@@ -1,0 +1,16 @@
+# Ignorar ambiente virtual
+venv/
+.env
+
+# Ignorar dados (NUNCA suba os dados reais para o GitHub público)
+*.xlsx
+*.csv
+data/
+
+# Ignorar arquivos temporários do Python e Notebooks
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Ignorar configurações locais do VS Code
+.vscode/
