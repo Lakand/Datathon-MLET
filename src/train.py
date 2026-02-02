@@ -1,6 +1,9 @@
 # src/train.py
 import logging
 import sys
+import os
+import tempfile  # <--- Biblioteca nativa para lidar com arq temporários
+import warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -19,13 +22,27 @@ from src.preprocessing import DataPreprocessor
 from src.feature_engineering import FeatureEngineer
 from src import config
 
-# Configuração de Logging (Texto)
+# --- 1. FILTRO DE WARNINGS ---
+warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# --- 2. CONFIGURAÇÃO DE LOGGING COM ARQUIVO TEMPORÁRIO ---
+# Cria um arquivo temporário no SO. O delete=False é necessário no Windows
+# para permitir que o logging e o mlflow acessem o arquivo simultaneamente.
+temp_log_file = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
+temp_log_path = temp_log_file.name
+temp_log_file.close() # Fechamos aqui para o Logging poder abrir em seguida
+
+# Reseta handlers anteriores
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('training_pipeline.log', mode='w')
+        logging.StreamHandler(sys.stdout),       # Console
+        logging.FileHandler(temp_log_path, mode='w') # Arquivo Temp Oculto
     ]
 )
 logger = logging.getLogger(__name__)
@@ -41,7 +58,6 @@ def plot_confusion_matrix(y_true, y_pred, title="Confusion Matrix"):
     plt.ylabel('Real')
     plt.xlabel('Previsto')
     
-    # Salva no diretório de imagens definido no config
     save_path = config.IMG_DIR / "confusion_matrix.png"
     plt.savefig(save_path)
     plt.close()
@@ -51,11 +67,9 @@ def train_pipeline():
     # --- Configura o MLflow ---
     mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
     
-    # Inicia uma "Run" (Execução) do MLflow
     with mlflow.start_run():
-        logger.info("=== Iniciando Pipeline com Rastreamento MLflow ===")
+        logger.info(f"=== Pipeline Iniciado (Log Temporário: {temp_log_path}) ===")
         
-        # 1. Logar Hiperparâmetros (O que usamos para configurar)
         mlflow.log_params(config.MODEL_PARAMS)
         mlflow.log_params(config.SPLIT_PARAMS)
         mlflow.log_param("strategy", "Meio Termo (No Leakage)")
@@ -84,7 +98,6 @@ def train_pipeline():
             f1_scores = []
 
             for fold, (t_idx, v_idx) in enumerate(sgkf.split(df_train, df_train['PEDRA'], groups=df_train['RA']), 1):
-                # Pipeline Local (Feature Eng -> SMOTE -> Modelo)
                 fe_cv = FeatureEngineer()
                 fe_cv.fit(df_train.iloc[t_idx])
                 X_t, y_t = fe_cv.transform(df_train.iloc[t_idx])
@@ -93,19 +106,18 @@ def train_pipeline():
                 smote = SMOTE(random_state=config.MODEL_PARAMS['random_state'])
                 X_t_res, y_t_res = smote.fit_resample(X_t, y_t)
                 
-                # Ajuste de iter para ser rápido no CV
+                # Aumentamos iterações para evitar warning de convergência
                 params_cv = config.MODEL_PARAMS.copy()
-                params_cv['max_iter'] = 1000
+                params_cv['max_iter'] = 2000 
+                
                 mlp_cv = MLPClassifier(**params_cv)
                 mlp_cv.fit(X_t_res, y_t_res)
                 
                 score = f1_score(y_v, mlp_cv.predict(X_v), average='macro')
                 f1_scores.append(score)
 
-            # Logar métricas do CV no MLflow
             mean_cv_f1 = np.mean(f1_scores)
             mlflow.log_metric("cv_mean_f1", mean_cv_f1)
-            mlflow.log_metric("cv_std_f1", np.std(f1_scores))
             logger.info(f"CV F1-Macro: {mean_cv_f1:.4f}")
 
             # --- Treino Final ---
@@ -120,40 +132,44 @@ def train_pipeline():
             model_final = MLPClassifier(**config.MODEL_PARAMS)
             model_final.fit(X_res, y_res)
             
-            # --- Avaliação Final (Teste) ---
+            # --- Avaliação Final ---
             X_test_scaled, y_test_real = fe_final.transform(df_test)
             y_pred_test = model_final.predict(X_test_scaled)
             
-            # Métricas Finais
             test_f1 = f1_score(y_test_real, y_pred_test, average='macro')
             test_acc = accuracy_score(y_test_real, y_pred_test)
             
-            # Logar no MLflow
             mlflow.log_metric("test_f1_macro", test_f1)
             mlflow.log_metric("test_accuracy", test_acc)
-            
             logger.info(f"Test F1: {test_f1:.4f} | Acc: {test_acc:.4f}")
 
             # --- Salvando Artefatos ---
-            # 1. Salvar Modelos Locais
             save_artifact(model_final, config.MODEL_PATH)
             save_artifact(fe_final, config.PIPELINE_PATH)
             
-            # 2. Gerar e Logar Matriz de Confusão (Imagem)
             cm_path = plot_confusion_matrix(y_test_real, y_pred_test)
-            mlflow.log_artifact(cm_path) # Envia a imagem para o MLflow
-
-            # 3. Logar o modelo (formato sklearn nativo)
+            mlflow.log_artifact(cm_path)
             mlflow.sklearn.log_model(model_final, "mlp_model")
             
-            # 4. Logar o arquivo de texto de logs também
-            mlflow.log_artifact("training_pipeline.log")
-
+            # --- UPLOAD DO LOG TEMPORÁRIO ---
+            # Aqui está a mágica: enviamos o arquivo temp para o MLflow
+            # mas renomeamos ele para "training.log" dentro do MLflow para ficar bonito
+            mlflow.log_artifact(temp_log_path, artifact_path="logs")
             logger.info("Pipeline concluído e registrado no MLflow!")
 
         except Exception as e:
             logger.critical(f"Erro no pipeline: {e}")
             raise e
+        finally:
+            # Limpeza final do arquivo temporário do sistema
+            try:
+                # Fecha handlers para liberar o arquivo
+                for handler in logging.root.handlers:
+                    handler.close()
+                if os.path.exists(temp_log_path):
+                    os.remove(temp_log_path)
+            except Exception as e:
+                print(f"Erro ao limpar log temporário: {e}")
 
 if __name__ == "__main__":
     train_pipeline()
