@@ -2,23 +2,22 @@
 import os
 from pathlib import Path
 
-# --- Caminhos ---
+# --- Caminhos do Projeto ---
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
-IMG_DIR = BASE_DIR / "images"  # <--- Novo: Pasta para salvar gráficos
 
-# Criar diretórios se não existirem
+# Garante que os diretórios essenciais existam
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-IMG_DIR.mkdir(parents=True, exist_ok=True) # <--- Novo
 
+# Caminhos dos arquivos
 RAW_DATA_PATH = DATA_DIR / "BASE DE DADOS PEDE 2024 - DATATHON.xlsx"
 TEST_DATA_PATH = DATA_DIR / "test_dataset.csv"
 MODEL_PATH = MODELS_DIR / "mlp_model.joblib"
 PIPELINE_PATH = MODELS_DIR / "pipeline_features.joblib"
 
 # --- MLflow ---
-MLFLOW_EXPERIMENT_NAME = "Passos_Magicos_Classification" # <--- Novo
+MLFLOW_EXPERIMENT_NAME = "Passos_Magicos_Classification"
 
 # --- Hiperparâmetros ---
 MODEL_PARAMS = {

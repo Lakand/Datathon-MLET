@@ -2,7 +2,7 @@
 import logging
 import sys
 import os
-import tempfile  # <--- Biblioteca nativa para lidar com arq temporários
+import tempfile
 import warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -22,18 +22,15 @@ from src.preprocessing import DataPreprocessor
 from src.feature_engineering import FeatureEngineer
 from src import config
 
-# --- 1. FILTRO DE WARNINGS ---
+# --- 1. FILTROS ---
 warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# --- 2. CONFIGURAÇÃO DE LOGGING COM ARQUIVO TEMPORÁRIO ---
-# Cria um arquivo temporário no SO. O delete=False é necessário no Windows
-# para permitir que o logging e o mlflow acessem o arquivo simultaneamente.
+# --- 2. SETUP DE LOGGING TEMPORÁRIO ---
 temp_log_file = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
 temp_log_path = temp_log_file.name
-temp_log_file.close() # Fechamos aqui para o Logging poder abrir em seguida
+temp_log_file.close()
 
-# Reseta handlers anteriores
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 
@@ -41,14 +38,14 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),       # Console
-        logging.FileHandler(temp_log_path, mode='w') # Arquivo Temp Oculto
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(temp_log_path, mode='w')
     ]
 )
 logger = logging.getLogger(__name__)
 
 def plot_confusion_matrix(y_true, y_pred, title="Confusion Matrix"):
-    """Gera e salva a matriz de confusão como imagem"""
+    """Gera a matriz e salva em um arquivo temporário"""
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
@@ -58,17 +55,22 @@ def plot_confusion_matrix(y_true, y_pred, title="Confusion Matrix"):
     plt.ylabel('Real')
     plt.xlabel('Previsto')
     
-    save_path = config.IMG_DIR / "confusion_matrix.png"
-    plt.savefig(save_path)
-    plt.close()
-    return str(save_path)
+    # Cria arquivo temporário para a imagem
+    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    plt.savefig(temp_img.name)
+    plt.close() # Libera a memória do Matplotlib
+    temp_img.close() # Libera o arquivo do OS
+    
+    return temp_img.name # Retorna o caminho temporário
 
 def train_pipeline():
-    # --- Configura o MLflow ---
     mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
     
+    # Variável para controlar a limpeza da imagem depois
+    temp_img_path = None
+    
     with mlflow.start_run():
-        logger.info(f"=== Pipeline Iniciado (Log Temporário: {temp_log_path}) ===")
+        logger.info(f"=== Pipeline Iniciado ===")
         
         mlflow.log_params(config.MODEL_PARAMS)
         mlflow.log_params(config.SPLIT_PARAMS)
@@ -106,7 +108,6 @@ def train_pipeline():
                 smote = SMOTE(random_state=config.MODEL_PARAMS['random_state'])
                 X_t_res, y_t_res = smote.fit_resample(X_t, y_t)
                 
-                # Aumentamos iterações para evitar warning de convergência
                 params_cv = config.MODEL_PARAMS.copy()
                 params_cv['max_iter'] = 2000 
                 
@@ -147,13 +148,15 @@ def train_pipeline():
             save_artifact(model_final, config.MODEL_PATH)
             save_artifact(fe_final, config.PIPELINE_PATH)
             
-            cm_path = plot_confusion_matrix(y_test_real, y_pred_test)
-            mlflow.log_artifact(cm_path)
+            # --- LOG DA IMAGEM TEMPORÁRIA ---
+            # Gera imagem na pasta temporária oculta
+            temp_img_path = plot_confusion_matrix(y_test_real, y_pred_test)
+            # Envia para o MLflow (lá ela fica salva pra sempre)
+            mlflow.log_artifact(temp_img_path)
+            
             mlflow.sklearn.log_model(model_final, "mlp_model")
             
-            # --- UPLOAD DO LOG TEMPORÁRIO ---
-            # Aqui está a mágica: enviamos o arquivo temp para o MLflow
-            # mas renomeamos ele para "training.log" dentro do MLflow para ficar bonito
+            # Upload do Log de Texto
             mlflow.log_artifact(temp_log_path, artifact_path="logs")
             logger.info("Pipeline concluído e registrado no MLflow!")
 
@@ -161,15 +164,22 @@ def train_pipeline():
             logger.critical(f"Erro no pipeline: {e}")
             raise e
         finally:
-            # Limpeza final do arquivo temporário do sistema
+            # --- LIMPEZA GERAL ---
+            # 1. Limpa Log de Texto
             try:
-                # Fecha handlers para liberar o arquivo
                 for handler in logging.root.handlers:
                     handler.close()
                 if os.path.exists(temp_log_path):
                     os.remove(temp_log_path)
             except Exception as e:
-                print(f"Erro ao limpar log temporário: {e}")
+                print(f"Erro ao limpar log: {e}")
+            
+            # 2. Limpa Imagem Temporária
+            try:
+                if temp_img_path and os.path.exists(temp_img_path):
+                    os.remove(temp_img_path)
+            except Exception as e:
+                print(f"Erro ao limpar imagem: {e}")
 
 if __name__ == "__main__":
     train_pipeline()
