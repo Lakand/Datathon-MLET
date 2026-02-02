@@ -10,8 +10,9 @@ joblib==1.4.2
 imbalanced-learn==0.13.0
 xgboost==2.0.3
 
-# --- MLOps & Rastreamento ---
+# --- MLOps & Rastreamento & Drift ---
 mlflow==2.14.1
+evidently==0.4.24
 
 # --- Visualização de Dados ---
 matplotlib==3.9.0
@@ -27,6 +28,7 @@ uvicorn==0.30.1
 pydantic==2.7.1
 python-multipart==0.0.9
 
-# --- Testes Unitários ---
+# --- Testes e Requisições ---
 pytest==8.2.1
 httpx==0.27.0
+requests==2.32.3

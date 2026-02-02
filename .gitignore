@@ -1,6 +1,7 @@
 # --- Ambiente Virtual ---
 venv/
 .env
+.python-version
 
 # --- Dados (NUNCA enviar para o GitHub) ---
 data/
@@ -13,3 +14,20 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 .vscode/
+.idea/
+
+# --- MLOps e Logs (O que faltava) ---
+mlruns/
+*.log
+
+# --- Monitoramento e Banco de Dados ---
+*.db
+monitoring.db
+
+# --- Testes Unitários ---
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Docker (Opcional, se gerar logs locais) ---
+*.cid
