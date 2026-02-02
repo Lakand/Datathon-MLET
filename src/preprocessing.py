@@ -1,6 +1,11 @@
+# src/preprocessing.py
 import pandas as pd
 import numpy as np
-import re
+import logging
+from typing import Dict, List, Optional
+
+# Configuração de Log local
+logger = logging.getLogger(__name__)
 
 class DataPreprocessor:
     def __init__(self):
@@ -30,7 +35,8 @@ class DataPreprocessor:
             'IPP': 'IPP', 'Pedra 2024': 'PEDRA'
         }
 
-    def run(self, dict_abas):
+    def run(self, dict_abas: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        logger.info("Iniciando pré-processamento das abas...")
         dfs = []
         for nome_aba, df in dict_abas.items():
             df_temp = df.copy()
@@ -43,6 +49,7 @@ class DataPreprocessor:
             elif "2024" in nome_aba: ano = 2024; mapa = self.mapa_2024
             
             if ano:
+                logger.debug(f"Processando aba: {nome_aba} (Ano: {ano})")
                 # Remove colunas duplicadas
                 df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
                 
@@ -58,16 +65,18 @@ class DataPreprocessor:
                 dfs.append(df_clean)
         
         if not dfs:
-            raise Exception("Nenhuma aba válida encontrada!")
+            logger.error("Nenhuma aba válida encontrada no arquivo Excel.")
+            raise ValueError("Nenhuma aba válida encontrada!")
             
         df_final = pd.concat(dfs, ignore_index=True)
         
-        # --- APLICAÇÃO DAS LIMPEZAS DO NOTEBOOK ---
+        # --- APLICAÇÃO DAS LIMPEZAS ---
         df_final = self._clean_data(df_final)
         
+        logger.info(f"Pré-processamento concluído. Shape final: {df_final.shape}")
         return df_final
 
-    def _clean_data(self, df):
+    def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         # 1. Padronizar Pedra
         correcoes = {'Agata': 'Ágata'}
         if 'PEDRA' in df.columns:
@@ -75,26 +84,22 @@ class DataPreprocessor:
             pedras_validas = ['Quartzo', 'Ágata', 'Ametista', 'Topázio']
             df = df[df['PEDRA'].isin(pedras_validas)].copy()
 
-        # 2. Limpeza de IDADE (Lógica do Notebook)
-        # Converte datas estranhas (1900-01-11) para o dia (11)
+        # 2. Limpeza de IDADE
         if 'IDADE' in df.columns:
             df['IDADE'] = df['IDADE'].astype(str)
             mask_datas = df['IDADE'].str.startswith('1900-')
-            # Extrai o dia da data se for formato data
             df.loc[mask_datas, 'IDADE'] = pd.to_datetime(df.loc[mask_datas, 'IDADE'], errors='coerce').dt.day
-            # Converte tudo para numérico, forçando erros a NaN
             df['IDADE'] = pd.to_numeric(df['IDADE'], errors='coerce')
 
-        # 3. Limpeza de FASE e FASE_IDEAL (Extrair apenas números)
+        # 3. Limpeza de FASE e FASE_IDEAL
         for col in ['FASE', 'FASE_IDEAL']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.extract(r'(\d+)')
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 4. Limpeza de RA (Remover não dígitos)
+        # 4. Limpeza de RA
         if 'RA' in df.columns:
             df['RA'] = df['RA'].astype(str).str.replace(r'\D', '', regex=True)
-            # Remove RAs vazios ou inválidos
             df = df[df['RA'] != '']
             
         return df

@@ -1,129 +1,159 @@
-from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
-from sklearn.metrics import f1_score, classification_report, confusion_matrix
-from imblearn.over_sampling import SMOTE
+# src/train.py
+import logging
+import sys
+import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 import numpy as np
-import joblib
+import mlflow
+import mlflow.sklearn
+
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
+from sklearn.metrics import f1_score, classification_report, confusion_matrix, accuracy_score
+from imblearn.over_sampling import SMOTE
+
+# Importações locais
 from src.utils import load_data, save_artifact
 from src.preprocessing import DataPreprocessor
 from src.feature_engineering import FeatureEngineer
+from src import config
+
+# Configuração de Logging (Texto)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('training_pipeline.log', mode='w')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def plot_confusion_matrix(y_true, y_pred, title="Confusion Matrix"):
+    """Gera e salva a matriz de confusão como imagem"""
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=config.MAPA_PEDRA.keys(), 
+                yticklabels=config.MAPA_PEDRA.keys())
+    plt.title(title)
+    plt.ylabel('Real')
+    plt.xlabel('Previsto')
+    
+    # Salva no diretório de imagens definido no config
+    save_path = config.IMG_DIR / "confusion_matrix.png"
+    plt.savefig(save_path)
+    plt.close()
+    return str(save_path)
 
 def train_pipeline():
-    print("1. Carregando dados...")
-    dict_abas = load_data('data/BASE DE DADOS PEDE 2024 - DATATHON.xlsx')
+    # --- Configura o MLflow ---
+    mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
     
-    print("2. Pré-processamento inicial...")
-    preprocessor = DataPreprocessor()
-    df_clean = preprocessor.run(dict_abas)
-    
-    # Validação rápida de RAs nulos
-    df_clean = df_clean.dropna(subset=['RA']).reset_index(drop=True)
-    
-    print("3. Divisão Treino/Teste (Holdout) por RA...")
-    # Mantemos o GroupShuffleSplit para separar um teste final intocado
-    splitter = GroupShuffleSplit(test_size=0.2, n_splits=1, random_state=42)
-    train_idx, test_idx = next(splitter.split(df_clean, groups=df_clean['RA']))
-    
-    df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
-    df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
-    
-    print(f"   Alunos no Treino: {df_train['RA'].nunique()}")
-    print(f"   Alunos no Teste (Final): {df_test['RA'].nunique()}")
+    # Inicia uma "Run" (Execução) do MLflow
+    with mlflow.start_run():
+        logger.info("=== Iniciando Pipeline com Rastreamento MLflow ===")
+        
+        # 1. Logar Hiperparâmetros (O que usamos para configurar)
+        mlflow.log_params(config.MODEL_PARAMS)
+        mlflow.log_params(config.SPLIT_PARAMS)
+        mlflow.log_param("strategy", "Meio Termo (No Leakage)")
 
-    # --- INÍCIO DA VALIDAÇÃO CRUZADA (CROSS VALIDATION) ---
-    print("\n4. Iniciando Cross-Validation (K-Fold) no Treino...")
-    
-    # Usamos StratifiedGroupKFold para garantir que:
-    # 1. O mesmo RA não apareça em treino e validação (Group)
-    # 2. A proporção das classes (Pedras) seja mantida (Stratified)
-    sgkf = StratifiedGroupKFold(n_splits=10)
-    
-    f1_scores = []
-    fold = 1
-    
-    # Precisamos preparar os arrays para o Split
-    X_cv = df_train # O FeatureEngineer vai selecionar as colunas internamente
-    y_cv = df_train['PEDRA'] # Apenas para o split, será processado depois
-    groups_cv = df_train['RA']
-    
-    # Loop de Validação
-    for t_idx, v_idx in sgkf.split(X_cv, y_cv, groups=groups_cv):
-        # Separa os dados da dobra
-        cv_train = df_train.iloc[t_idx].copy()
-        cv_val = df_train.iloc[v_idx].copy()
-        
-        # Pipeline Local (Feature Engineering -> SMOTE -> Modelo)
-        fe_cv = FeatureEngineer()
-        fe_cv.fit(cv_train)
-        
-        X_t_scaled, y_t = fe_cv.transform(cv_train)
-        X_v_scaled, y_v = fe_cv.transform(cv_val)
-        
-        # SMOTE apenas no treino da dobra
-        smote = SMOTE(random_state=42)
-        X_t_res, y_t_res = smote.fit_resample(X_t_scaled, y_t)
-        
-        # Modelo MLP
-        mlp_cv = MLPClassifier(
-            hidden_layer_sizes=(50,),
-            activation='relu',
-            alpha=0.01,
-            learning_rate_init=0.001,
-            max_iter=1000, # Menos iteracoes para ser mais rapido no CV
-            random_state=42
-        )
-        mlp_cv.fit(X_t_res, y_t_res)
-        
-        # Avaliação
-        y_pred_val = mlp_cv.predict(X_v_scaled)
-        score = f1_score(y_v, y_pred_val, average='macro')
-        f1_scores.append(score)
-        print(f"   Fold {fold}: F1-Macro = {score:.4f}")
-        fold += 1
-        
-    print(f"   >>> Média F1-Score (CV): {np.mean(f1_scores):.4f} (+/- {np.std(f1_scores):.4f})")
-    
-    # --- TREINO FINAL (FULL DATASET) ---
-    print("\n5. Treinando Modelo Final (Todo o Dataset de Treino)...")
-    
-    # 1. Feature Engineering Global
-    fe_final = FeatureEngineer()
-    fe_final.fit(df_train)
-    X_train_final, y_train_final = fe_final.transform(df_train)
-    
-    # 2. SMOTE Global
-    smote_final = SMOTE(random_state=42)
-    X_resampled, y_resampled = smote_final.fit_resample(X_train_final, y_train_final)
-    
-    # 3. Modelo Final (Melhores Hiperparâmetros)
-    mlp_final = MLPClassifier(
-        hidden_layer_sizes=(50,),
-        activation='relu',
-        alpha=0.01,
-        learning_rate_init=0.001,
-        solver='adam',
-        max_iter=3000, 
-        random_state=42
-    )
-    
-    mlp_final.fit(X_resampled, y_resampled)
-    print("Modelo Final treinado com sucesso!")
-    
-    # --- AVALIAÇÃO FINAL (TEST SET) ---
-    print("\n6. Avaliação no Conjunto de Teste (Holdout)...")
-    X_test_scaled, y_test_real = fe_final.transform(df_test)
-    y_pred_test = mlp_final.predict(X_test_scaled)
-    
-    print(classification_report(y_test_real, y_pred_test))
-    
-    # Salvando artefatos
-    save_artifact(mlp_final, 'models/mlp_model.joblib')
-    save_artifact(fe_final, 'models/pipeline_features.joblib')
-    
-    # Salvando datasets processados para auditoria
-    df_test.to_csv('data/test_dataset.csv', index=False)
-    print("Pipeline concluído e artefatos salvos.")
+        try:
+            # --- Carga e Prep ---
+            logger.info(f"Carregando dados...")
+            dict_abas = load_data(str(config.RAW_DATA_PATH))
+            preprocessor = DataPreprocessor()
+            df_clean = preprocessor.run(dict_abas)
+            df_clean = df_clean.dropna(subset=['RA']).reset_index(drop=True)
+            
+            # --- Split ---
+            splitter = GroupShuffleSplit(
+                test_size=config.SPLIT_PARAMS['test_size'], 
+                n_splits=1, 
+                random_state=config.SPLIT_PARAMS['random_state']
+            )
+            train_idx, test_idx = next(splitter.split(df_clean, groups=df_clean['RA']))
+            df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
+            df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
+
+            # --- Cross Validation ---
+            logger.info("Iniciando Cross-Validation...")
+            sgkf = StratifiedGroupKFold(n_splits=config.SPLIT_PARAMS['n_splits_cv'])
+            f1_scores = []
+
+            for fold, (t_idx, v_idx) in enumerate(sgkf.split(df_train, df_train['PEDRA'], groups=df_train['RA']), 1):
+                # Pipeline Local (Feature Eng -> SMOTE -> Modelo)
+                fe_cv = FeatureEngineer()
+                fe_cv.fit(df_train.iloc[t_idx])
+                X_t, y_t = fe_cv.transform(df_train.iloc[t_idx])
+                X_v, y_v = fe_cv.transform(df_train.iloc[v_idx])
+                
+                smote = SMOTE(random_state=config.MODEL_PARAMS['random_state'])
+                X_t_res, y_t_res = smote.fit_resample(X_t, y_t)
+                
+                # Ajuste de iter para ser rápido no CV
+                params_cv = config.MODEL_PARAMS.copy()
+                params_cv['max_iter'] = 1000
+                mlp_cv = MLPClassifier(**params_cv)
+                mlp_cv.fit(X_t_res, y_t_res)
+                
+                score = f1_score(y_v, mlp_cv.predict(X_v), average='macro')
+                f1_scores.append(score)
+
+            # Logar métricas do CV no MLflow
+            mean_cv_f1 = np.mean(f1_scores)
+            mlflow.log_metric("cv_mean_f1", mean_cv_f1)
+            mlflow.log_metric("cv_std_f1", np.std(f1_scores))
+            logger.info(f"CV F1-Macro: {mean_cv_f1:.4f}")
+
+            # --- Treino Final ---
+            logger.info("Treinando modelo final...")
+            fe_final = FeatureEngineer()
+            fe_final.fit(df_train)
+            X_final, y_final = fe_final.transform(df_train)
+            
+            smote_final = SMOTE(random_state=config.MODEL_PARAMS['random_state'])
+            X_res, y_res = smote_final.fit_resample(X_final, y_final)
+            
+            model_final = MLPClassifier(**config.MODEL_PARAMS)
+            model_final.fit(X_res, y_res)
+            
+            # --- Avaliação Final (Teste) ---
+            X_test_scaled, y_test_real = fe_final.transform(df_test)
+            y_pred_test = model_final.predict(X_test_scaled)
+            
+            # Métricas Finais
+            test_f1 = f1_score(y_test_real, y_pred_test, average='macro')
+            test_acc = accuracy_score(y_test_real, y_pred_test)
+            
+            # Logar no MLflow
+            mlflow.log_metric("test_f1_macro", test_f1)
+            mlflow.log_metric("test_accuracy", test_acc)
+            
+            logger.info(f"Test F1: {test_f1:.4f} | Acc: {test_acc:.4f}")
+
+            # --- Salvando Artefatos ---
+            # 1. Salvar Modelos Locais
+            save_artifact(model_final, config.MODEL_PATH)
+            save_artifact(fe_final, config.PIPELINE_PATH)
+            
+            # 2. Gerar e Logar Matriz de Confusão (Imagem)
+            cm_path = plot_confusion_matrix(y_test_real, y_pred_test)
+            mlflow.log_artifact(cm_path) # Envia a imagem para o MLflow
+
+            # 3. Logar o modelo (formato sklearn nativo)
+            mlflow.sklearn.log_model(model_final, "mlp_model")
+            
+            # 4. Logar o arquivo de texto de logs também
+            mlflow.log_artifact("training_pipeline.log")
+
+            logger.info("Pipeline concluído e registrado no MLflow!")
+
+        except Exception as e:
+            logger.critical(f"Erro no pipeline: {e}")
+            raise e
 
 if __name__ == "__main__":
     train_pipeline()
