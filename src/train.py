@@ -94,6 +94,14 @@ def train_pipeline():
             df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
             df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
 
+            # Em src/train.py, logo após a criação do df_test:
+            df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
+            df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
+
+            # --- ADICIONE ISTO ---
+            logger.info(f"Salvando dataset de teste em: {config.TEST_DATA_PATH}")
+            df_test.to_csv(config.TEST_DATA_PATH, index=False)
+
             # --- Cross Validation ---
             logger.info("Iniciando Cross-Validation...")
             sgkf = StratifiedGroupKFold(n_splits=config.SPLIT_PARAMS['n_splits_cv'])
