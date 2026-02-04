@@ -4,6 +4,8 @@ import sys
 import os
 import tempfile
 import warnings
+import matplotlib
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -31,6 +33,7 @@ temp_log_file = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
 temp_log_path = temp_log_file.name
 temp_log_file.close()
 
+# Reseta handlers para evitar duplicação
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 
@@ -55,20 +58,22 @@ def plot_confusion_matrix(y_true, y_pred, title="Confusion Matrix"):
     plt.ylabel('Real')
     plt.xlabel('Previsto')
     
-    # Cria arquivo temporário para a imagem
     temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     plt.savefig(temp_img.name)
-    plt.close() # Libera a memória do Matplotlib
-    temp_img.close() # Libera o arquivo do OS
+    plt.close()
+    temp_img.close()
     
-    return temp_img.name # Retorna o caminho temporário
+    return temp_img.name
 
 def train_pipeline():
+    """
+    Executa o pipeline completo de treinamento e retorna um resumo das métricas.
+    """
     mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
     
-    # Variável para controlar a limpeza da imagem depois
     temp_img_path = None
-    
+    metrics_summary = {}
+
     with mlflow.start_run():
         logger.info(f"=== Pipeline Iniciado ===")
         
@@ -94,11 +99,6 @@ def train_pipeline():
             df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
             df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
 
-            # Em src/train.py, logo após a criação do df_test:
-            df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
-            df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
-
-            # --- ADICIONE ISTO ---
             logger.info(f"Salvando dataset de teste em: {config.TEST_DATA_PATH}")
             df_test.to_csv(config.TEST_DATA_PATH, index=False)
 
@@ -157,9 +157,7 @@ def train_pipeline():
             save_artifact(fe_final, config.PIPELINE_PATH)
             
             # --- LOG DA IMAGEM TEMPORÁRIA ---
-            # Gera imagem na pasta temporária oculta
             temp_img_path = plot_confusion_matrix(y_test_real, y_pred_test)
-            # Envia para o MLflow (lá ela fica salva pra sempre)
             mlflow.log_artifact(temp_img_path)
             
             mlflow.sklearn.log_model(model_final, "mlp_model")
@@ -167,13 +165,21 @@ def train_pipeline():
             # Upload do Log de Texto
             mlflow.log_artifact(temp_log_path, artifact_path="logs")
             logger.info("Pipeline concluído e registrado no MLflow!")
+            
+            # Prepara retorno para a API
+            metrics_summary = {
+                "status": "success",
+                "cv_mean_f1": float(mean_cv_f1),
+                "test_f1_macro": float(test_f1),
+                "test_accuracy": float(test_acc),
+                "artifacts_saved": [str(config.MODEL_PATH), str(config.PIPELINE_PATH)]
+            }
 
         except Exception as e:
             logger.critical(f"Erro no pipeline: {e}")
             raise e
         finally:
             # --- LIMPEZA GERAL ---
-            # 1. Limpa Log de Texto
             try:
                 for handler in logging.root.handlers:
                     handler.close()
@@ -182,12 +188,13 @@ def train_pipeline():
             except Exception as e:
                 print(f"Erro ao limpar log: {e}")
             
-            # 2. Limpa Imagem Temporária
             try:
                 if temp_img_path and os.path.exists(temp_img_path):
                     os.remove(temp_img_path)
             except Exception as e:
                 print(f"Erro ao limpar imagem: {e}")
+                
+    return metrics_summary
 
 if __name__ == "__main__":
-    train_pipeline()
+    print(train_pipeline())

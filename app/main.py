@@ -28,9 +28,13 @@ async def lifespan(app: FastAPI):
         app.state.model = joblib.load(config.MODEL_PATH)
         app.state.pipeline = joblib.load(config.PIPELINE_PATH)
         print("Modelos carregados com sucesso!")
+    except FileNotFoundError:
+        print(f"AVISO: Modelos não encontrados em '{config.MODEL_PATH}'.")
+        print("A API iniciou, mas você deve chamar POST /train antes de fazer predições.")
+        app.state.model = None
+        app.state.pipeline = None
     except Exception as e:
-        print(f"ERRO CRÍTICO ao carregar modelos: {e}")
-        # Em produção, talvez fosse melhor falhar o startup aqui
+        print(f"ERRO DESCONHECIDO ao carregar modelos: {e}")
         
     yield
     # --- SHUTDOWN ---

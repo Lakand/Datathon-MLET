@@ -12,6 +12,7 @@ xgboost==2.0.3
 
 # --- MLOps & Rastreamento & Drift ---
 mlflow==2.14.1
+setuptools<70.0.0
 evidently==0.4.24
 
 # --- Visualização de Dados ---
