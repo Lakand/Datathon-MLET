@@ -1,0 +1,16 @@
+services:
+  api-passos-magicos:
+    build: .
+    container_name: api-passos-magicos
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persiste o banco de dados de monitoramento
+      - ./monitoring.db:/app/monitoring.db
+      # Persiste os relatórios de drift gerados na pasta docs
+      - ./docs:/app/docs
+      # Mapeia a pasta models para permitir trocar o modelo sem rebuildar (opcional, mas útil)
+      - ./models:/app/models
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: always
