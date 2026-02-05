@@ -1,7 +1,8 @@
 # app/routes.py
 import os
 from fastapi import APIRouter, Request, HTTPException
-# Removido: from fastapi.responses import FileResponse (Não precisamos mais enviar o arquivo)
+# Adicionamos o FileResponse aqui para enviar o HTML
+from fastapi.responses import FileResponse 
 from typing import List
 import pandas as pd
 import joblib
@@ -86,16 +87,15 @@ def run_evaluation():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- ROTA 4: MONITORAMENTO DE DRIFT (Modificada) ---
-@router.get("/drift-report", summary="Gerar Relatório de Drift (Salvar Localmente)")
+# --- ROTA 4: MONITORAMENTO DE DRIFT (Atualizada) ---
+@router.get("/drift-report", summary="Gerar Relatório de Drift (HTML)")
 def get_drift_report():
     """
     Gera um relatório HTML comparando os dados de Treino vs Produção.
-    O arquivo será salvo na pasta 'docs/' do projeto.
+    Retorna o arquivo HTML diretamente para visualização no navegador.
     """
     try:
-        # A função generate_report JÁ SALVA o arquivo no disco.
-        # Nós só precisamos pegar o caminho que ela retorna.
+        # A função generate_report JÁ SALVA o arquivo na pasta docs/
         report_path = generate_report()
         
         if report_path == "SEM_DADOS":
@@ -107,12 +107,9 @@ def get_drift_report():
         if not report_path or not os.path.exists(report_path):
             raise HTTPException(status_code=500, detail="Falha interna ao gerar o arquivo.")
             
-        # Retorna apenas a mensagem de sucesso e o caminho
-        return {
-            "message": "Relatório gerado com sucesso!",
-            "file_location": report_path,
-            "instruction": "Vá até a pasta do projeto e abra este arquivo html manualmente no navegador."
-        }
+        # Retorna o arquivo HTML diretamente
+        # media_type='text/html' garante que o navegador renderize a página
+        return FileResponse(path=report_path, media_type='text/html', filename="drift_report.html")
         
     except HTTPException as he:
         raise he
