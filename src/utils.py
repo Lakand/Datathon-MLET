@@ -1,12 +1,22 @@
+# src/utils.py
 import pandas as pd
 import joblib
 import os
 
-def load_data(file_path):
-    """Carrega o arquivo Excel bruto."""
+def load_data(file_path, sheet_name=None):
+    """
+    Carrega o arquivo Excel bruto.
+    
+    Args:
+        file_path (str): Caminho do arquivo .xlsx
+        sheet_name (str, list, None): Nome da aba específica ou None para todas. 
+                                      Padrão é None (carrega todas).
+    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
-    return pd.read_excel(file_path, sheet_name=None)
+    
+    # Passamos o argumento sheet_name para permitir carregamento sob demanda (performance)
+    return pd.read_excel(file_path, sheet_name=sheet_name)
 
 def save_artifact(obj, filepath):
     """Salva modelos, scalers ou outros artefatos com joblib."""

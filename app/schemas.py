@@ -1,11 +1,20 @@
 # app/schemas.py
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
+from enum import Enum
+
+# CORREÇÃO: Adicionamos as variações de 2022 (Menino/Menina)
+# Agora a API aceita qualquer uma dessas 4 opções sem dar erro.
+class GeneroEnum(str, Enum):
+    MASCULINO = "Masculino"
+    FEMININO = "Feminino"
+    MENINO = "Menino"
+    MENINA = "Menina"
 
 class AlunoInput(BaseModel):
     RA: str
     IDADE: float
-    GENERO: str  # "Masculino" ou "Feminino"
+    GENERO: GeneroEnum 
     ANO_INGRESSO: int
     FASE: int
     NOTA_MAT: float
@@ -15,15 +24,14 @@ class AlunoInput(BaseModel):
     IPS: float
     IAA: float
     IPP: float
-    DEFASAGEM: int # 0 ou 1 (se tiver essa info prévia, senão trate como opcional)
+    DEFASAGEM: int 
 
-    # --- CORREÇÃO AQUI (Pydantic V2) ---
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "RA": "123456",
                 "IDADE": 14,
-                "GENERO": "Masculino",
+                "GENERO": "Menino",  # Exemplo testando a variação
                 "ANO_INGRESSO": 2022,
                 "FASE": 1,
                 "NOTA_MAT": 8.5,
