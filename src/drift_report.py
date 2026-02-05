@@ -1,5 +1,4 @@
 # src/drift_report.py
-import sys
 import os
 import logging
 import pandas as pd
@@ -9,9 +8,7 @@ from evidently.report import Report
 from evidently.metric_preset import DataDriftPreset
 from evidently import ColumnMapping
 
-# Adiciona raiz ao path para imports funcionarem
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+# Importações do projeto
 from src import config
 from src.utils import load_data
 from src.preprocessing import DataPreprocessor

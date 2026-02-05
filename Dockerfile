@@ -4,6 +4,10 @@ FROM python:3.10-slim
 # Define o diretório de trabalho dentro do container
 WORKDIR /app
 
+# [NOVO] Adiciona o diretório atual ao caminho de busca do Python
+# Isso substitui a necessidade de usar sys.path.append nos códigos
+ENV PYTHONPATH=/app
+
 # Instala dependências do sistema operacional (necessário para algumas libs numéricas)
 RUN apt-get update && apt-get install -y \
     build-essential \

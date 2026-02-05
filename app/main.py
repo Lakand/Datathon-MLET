@@ -1,17 +1,14 @@
 # app/main.py
-import sys
-import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import joblib
+import os
 
-# Adiciona a raiz ao path para conseguir importar 'src'
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+# Importações do projeto
 from app.routes import router
 from app.monitor import init_db
 from src import config
-# Importante: Importar a classe FeatureEngineer para o joblib não falhar
+# Importante: Importar a classe FeatureEngineer para o joblib não falhar na hora de carregar o pipeline
 from src.feature_engineering import FeatureEngineer 
 
 @asynccontextmanager
