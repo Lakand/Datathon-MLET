@@ -44,10 +44,21 @@ class DataPreprocessor:
             # Identifica o ano e mapa correto
             ano = None
             mapa = None
-            if "2022" in nome_aba: ano = 2022; mapa = self.mapa_2022
-            elif "2023" in nome_aba: ano = 2023; mapa = self.mapa_2023
-            elif "2024" in nome_aba: ano = 2024; mapa = self.mapa_2024
             
+            if "2022" in nome_aba: 
+                ano = 2022
+                mapa = self.mapa_2022
+            elif "2023" in nome_aba: 
+                ano = 2023
+                mapa = self.mapa_2023
+            elif "2024" in nome_aba: 
+                ano = 2024
+                mapa = self.mapa_2024
+            else:
+                # [MELHORIA] Aviso caso entre uma aba desconhecida (ex: "Planilha1" ou "2025")
+                logger.warning(f"Aba '{nome_aba}' ignorada: Ano não identificado no nome ou fora do escopo (2022-2024).")
+                continue # Pula para a próxima iteração do loop
+
             if ano:
                 logger.debug(f"Processando aba: {nome_aba} (Ano: {ano})")
                 # Remove colunas duplicadas
