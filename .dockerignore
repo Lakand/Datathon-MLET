@@ -3,7 +3,5 @@ __pycache__
 .git
 .gitignore
 venv
-monitoring.db
 mlruns
-*.joblib
 docs/*.html

@@ -3,7 +3,7 @@ venv/
 .env
 .python-version
 
-# --- Dados (NUNCA enviar para o GitHub) ---
+# --- Dados ---
 data/
 *.xlsx
 *.csv
@@ -16,7 +16,7 @@ __pycache__/
 .vscode/
 .idea/
 
-# --- MLOps e Logs (O que faltava) ---
+# --- MLOps e Logs ---
 mlruns/
 *.log
 
@@ -29,5 +29,5 @@ monitoring.db
 .coverage
 htmlcov/
 
-# --- Docker (Opcional, se gerar logs locais) ---
+# --- Docker ---
 *.cid
