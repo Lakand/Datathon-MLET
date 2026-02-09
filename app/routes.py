@@ -13,6 +13,8 @@ from src.config import MAPA_PEDRA, MODEL_PATH, PIPELINE_PATH
 from src.train import train_pipeline
 from src.evaluate import evaluate_model
 from src.drift_report import generate_report
+# [NOVO] Importando a função de regra de negócio
+from src.utils import calculate_risk_level 
 
 router = APIRouter()
 
@@ -49,8 +51,8 @@ def predict(request: Request, alunos: List[AlunoInput], background_tasks: Backgr
             pedra_nome = REVERSE_MAPA_PEDRA.get(pred_idx, "Desconhecido")
             aluno_raw = input_data[i]
             
-            # Regra de Negócio simples para Risco
-            risco = "Baixo" if pedra_nome in ['Topázio', 'Ametista'] else "Alto"
+            # [ALTERADO] Uso da função centralizada de Regra de Negócio
+            risco = calculate_risk_level(pedra_nome)
             
             result = {
                 "RA": aluno_raw.get("RA"),
