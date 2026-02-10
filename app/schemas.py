@@ -1,17 +1,48 @@
 # app/schemas.py
+"""Esquemas de Dados Pydantic (Data Transfer Objects).
+
+Este módulo define os modelos de dados utilizados para validação e serialização
+das entradas e saídas da API. Garante que os dados recebidos nos endpoints
+estejam no formato correto antes de serem processados pelo modelo de ML.
+"""
+
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from enum import Enum
 
-# CORREÇÃO: Adicionamos as variações de 2022 (Menino/Menina)
-# Agora a API aceita qualquer uma dessas 4 opções sem dar erro.
 class GeneroEnum(str, Enum):
+    """Enumeração para padronização dos valores de Gênero.
+
+    Aceita variações encontradas nos diferentes anos da base de dados (2022-2024),
+    como 'Masculino'/'Feminino' e 'Menino'/'Menina', garantindo que a API não
+    falhe por inconsistências de nomenclatura.
+    """
     MASCULINO = "Masculino"
     FEMININO = "Feminino"
     MENINO = "Menino"
     MENINA = "Menina"
 
 class AlunoInput(BaseModel):
+    """Modelo de entrada para os dados de um aluno.
+
+    Define os campos obrigatórios e seus tipos para a predição do risco.
+    Utiliza o Pydantic para validação automática dos tipos de dados.
+
+    Attributes:
+        RA (str): Registro Acadêmico do aluno (identificador único).
+        IDADE (float): Idade do aluno.
+        GENERO (GeneroEnum): Gênero (Masculino/Feminino/Menino/Menina).
+        ANO_INGRESSO (int): Ano em que o aluno ingressou na instituição.
+        FASE (int): Fase atual do aluno no programa.
+        NOTA_MAT (float): Nota em Matemática.
+        NOTA_PORT (float): Nota em Português.
+        NOTA_ING (float): Nota em Inglês.
+        IEG (float): Índice de Engajamento Global.
+        IPS (float): Índice de Psicossocial.
+        IAA (float): Índice de Autoavaliação.
+        IPP (float): Índice Psicopedagógico.
+        DEFASAGEM (int): Nível de defasagem escolar (0, 1, 2...).
+    """
     RA: str
     IDADE: float
     GENERO: GeneroEnum 
@@ -31,7 +62,7 @@ class AlunoInput(BaseModel):
             "example": {
                 "RA": "123456",
                 "IDADE": 14,
-                "GENERO": "Menino",  # Exemplo testando a variação
+                "GENERO": "Menino",
                 "ANO_INGRESSO": 2022,
                 "FASE": 1,
                 "NOTA_MAT": 8.5,

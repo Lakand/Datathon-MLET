@@ -1,4 +1,12 @@
 # app/routes.py
+"""Módulo de Rotas da API (Endpoints).
+
+Define os endpoints da aplicação FastAPI, orquestrando as chamadas para
+os serviços de predição, treinamento, avaliação e monitoramento de drift.
+Gerencia a interação HTTP e delega a lógica de negócios para os módulos
+especializados.
+"""
+
 import os
 import joblib
 import pandas as pd
@@ -6,14 +14,12 @@ from typing import List
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 
-# Importações do projeto
 from app.schemas import AlunoInput
 from app.monitor import log_prediction
 from src.config import MAPA_PEDRA, MODEL_PATH, PIPELINE_PATH
 from src.train import train_pipeline
 from src.evaluate import evaluate_model
 from src.drift_report import generate_report
-# [NOVO] Importando a função de regra de negócio
 from src.utils import calculate_risk_level 
 
 router = APIRouter()
@@ -23,10 +29,27 @@ REVERSE_MAPA_PEDRA = {v: k for k, v in MAPA_PEDRA.items()}
 
 # --- ROTA 1: PREDIÇÃO (COM BACKGROUND TASKS) ---
 @router.post("/predict", summary="Predição de Risco (Pedra)")
-def predict(request: Request, alunos: List[AlunoInput], background_tasks: BackgroundTasks):
-    """
-    Recebe dados de alunos, retorna a previsão do modelo e
-    grava os logs no banco de dados em segundo plano (assíncrono).
+def predict(request: Request, alunos: List[AlunoInput], background_tasks: BackgroundTasks) -> dict:
+    """Realiza a inferência de risco para uma lista de alunos.
+
+    Recebe os dados cadastrais e acadêmicos, processa através do pipeline
+    de machine learning e retorna a 'Pedra' prevista e o nível de risco.
+    
+    Adicionalmente, agenda uma tarefa em segundo plano (Background Task)
+    para salvar os logs da requisição no banco de dados, permitindo
+    monitoramento assíncrono sem impactar a latência da resposta.
+
+    Args:
+        request (Request): Objeto da requisição (usado para acessar o estado da app).
+        alunos (List[AlunoInput]): Lista de objetos com os dados dos alunos (validado pelo Pydantic).
+        background_tasks (BackgroundTasks): Gerenciador de tarefas assíncronas do FastAPI.
+
+    Returns:
+        dict: Dicionário contendo a lista de resultados com RA, Pedra Prevista e Risco.
+
+    Raises:
+        HTTPException(503): Se o modelo ainda não tiver sido treinado/carregado.
+        HTTPException(500): Erro interno durante o processamento.
     """
     try:
         # Recupera os modelos carregados na inicialização (main.py)
@@ -51,7 +74,7 @@ def predict(request: Request, alunos: List[AlunoInput], background_tasks: Backgr
             pedra_nome = REVERSE_MAPA_PEDRA.get(pred_idx, "Desconhecido")
             aluno_raw = input_data[i]
             
-            # [ALTERADO] Uso da função centralizada de Regra de Negócio
+            # Uso da função centralizada de Regra de Negócio
             risco = calculate_risk_level(pedra_nome)
             
             result = {
@@ -61,7 +84,7 @@ def predict(request: Request, alunos: List[AlunoInput], background_tasks: Backgr
             }
             results.append(result)
             
-            # [MELHORIA PRO] Gravação de Log em Segundo Plano
+            # Gravação de Log em Segundo Plano
             # O usuário recebe a resposta imediatamente, e o servidor grava o log depois.
             background_tasks.add_task(
                 log_prediction,
@@ -77,7 +100,22 @@ def predict(request: Request, alunos: List[AlunoInput], background_tasks: Backgr
 
 # --- ROTA 2: TREINAMENTO ---
 @router.post("/train", summary="Executar Treinamento do Modelo")
-def run_training(request: Request):
+def run_training(request: Request) -> dict:
+    """Dispara o pipeline de retreinamento do modelo completo.
+
+    Executa o processo de carga de dados, engenharia de features, treinamento
+    e validação. Após o sucesso, recarrega o modelo na memória da aplicação
+    para que as próximas predições usem a nova versão imediatamente.
+
+    Args:
+        request (Request): Objeto da requisição para atualizar o estado global (app.state).
+
+    Returns:
+        dict: Mensagem de sucesso e resumo das métricas de treinamento.
+
+    Raises:
+        HTTPException(500): Se ocorrer erro durante o treinamento.
+    """
     try:
         print("Iniciando treinamento via API...")
         train_results = train_pipeline()
@@ -96,7 +134,16 @@ def run_training(request: Request):
 
 # --- ROTA 3: AVALIAÇÃO ---
 @router.get("/evaluate", summary="Avaliar Performance do Modelo")
-def run_evaluation():
+def run_evaluation() -> dict:
+    """Executa a avaliação do modelo atual contra a base de teste (holdout).
+
+    Returns:
+        dict: Métricas de classificação (precision, recall, f1-score) e matriz de confusão.
+
+    Raises:
+        HTTPException(400): Se houver erro de validação (ex: arquivos não encontrados).
+        HTTPException(500): Erro interno inesperado.
+    """
     try:
         metrics = evaluate_model()
         if "error" in metrics:
@@ -108,9 +155,17 @@ def run_evaluation():
 # --- ROTA 4: MONITORAMENTO DE DRIFT ---
 @router.get("/drift-report", summary="Gerar Relatório de Drift (HTML)")
 def get_drift_report():
-    """
-    Gera um relatório HTML comparando os dados de Treino vs Produção.
-    Retorna o arquivo HTML diretamente para visualização no navegador.
+    """Gera e retorna um relatório visual de Data Drift.
+
+    Compara a distribuição estatística dos dados de treinamento com os dados
+    recebidos em produção (armazenados nos logs).
+
+    Returns:
+        FileResponse: O arquivo HTML do relatório renderizado.
+
+    Raises:
+        HTTPException(400): Se não houver dados suficientes em produção.
+        HTTPException(500): Falha na geração do arquivo.
     """
     try:
         report_path = generate_report()
