@@ -9,7 +9,7 @@ os nomes das colunas e unifica os dados em um único DataFrame.
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, List, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 

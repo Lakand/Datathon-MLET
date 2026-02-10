@@ -8,7 +8,6 @@ nomes de colunas variados entre anos e RAs inválidos).
 """
 
 import pandas as pd
-import pytest
 from src.preprocessing import DataPreprocessor
 
 def test_preprocessing_flow():

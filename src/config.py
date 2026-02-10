@@ -7,7 +7,6 @@ Centraliza as definições para facilitar a manutenção e garantir consistênci
 entre os ambientes de treino e produção.
 """
 
-import os
 from pathlib import Path
 
 # --- Definições de Estrutura de Diretórios ---

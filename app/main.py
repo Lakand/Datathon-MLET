@@ -9,12 +9,10 @@ para as rotas de inferência.
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import joblib
-import os
 
 from app.routes import router
 from app.monitor import init_db
 from src import config
-from src.feature_engineering import FeatureEngineer 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

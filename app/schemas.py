@@ -6,8 +6,7 @@ das entradas e saídas da API. Garante que os dados recebidos nos endpoints
 estejam no formato correto antes de serem processados pelo modelo de ML.
 """
 
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from pydantic import BaseModel, ConfigDict
 from enum import Enum
 
 class GeneroEnum(str, Enum):

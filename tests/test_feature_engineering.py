@@ -9,7 +9,6 @@ para as funções utilitárias de persistência de objetos (salvar/carregar).
 
 import pandas as pd
 import numpy as np
-import pytest
 import os
 from src.feature_engineering import FeatureEngineer
 from src.utils import save_artifact, load_artifact
