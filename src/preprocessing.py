@@ -1,15 +1,32 @@
 # src/preprocessing.py
+"""Módulo de Pré-processamento de Dados Brutos.
+
+Este módulo é responsável pela consolidação e limpeza inicial dos dados
+provenientes de arquivos Excel com múltiplas abas (anos). Ele padroniza
+os nomes das colunas e unifica os dados em um único DataFrame.
+"""
+
 import pandas as pd
 import numpy as np
 import logging
 from typing import Dict, List, Optional
 
-# Configuração de Log local
 logger = logging.getLogger(__name__)
 
 class DataPreprocessor:
+    """Gerencia o pré-processamento dos datasets do Passos Mágicos.
+
+    Responsável por identificar o esquema de colunas de cada ano (2022-2024),
+    renomear para um padrão interno único e realizar limpezas básicas de tipos
+    de dados.
+    """
+
     def __init__(self):
-        # Mapas de colunas originais
+        """Inicializa o DataPreprocessor com os mapas de colunas.
+
+        Define dicionários que mapeiam os nomes originais das colunas em cada
+        aba do Excel para os nomes padronizados do sistema.
+        """
         self.mapa_2022 = {
             'RA': 'RA', 'Fase': 'FASE', 'Gênero': 'GENERO', 'Idade 22': 'IDADE', 
             'Ano ingresso': 'ANO_INGRESSO', 'IAA': 'IAA', 'IEG': 'IEG', 
@@ -36,12 +53,26 @@ class DataPreprocessor:
         }
 
     def run(self, dict_abas: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """Executa o pipeline de pré-processamento nas abas fornecidas.
+
+        Itera sobre o dicionário de DataFrames, identifica o ano correspondente
+        pelo nome da aba, seleciona/renomeia colunas e concatena os resultados.
+
+        Args:
+            dict_abas (Dict[str, pd.DataFrame]): Dicionário onde as chaves são os
+                nomes das abas e os valores são DataFrames brutos.
+
+        Returns:
+            pd.DataFrame: DataFrame único consolidado e limpo.
+
+        Raises:
+            ValueError: Se nenhuma aba válida (contendo 2022, 2023 ou 2024) for encontrada.
+        """
         logger.info("Iniciando pré-processamento das abas...")
         dfs = []
         for nome_aba, df in dict_abas.items():
             df_temp = df.copy()
             
-            # Identifica o ano e mapa correto
             ano = None
             mapa = None
             
@@ -55,21 +86,17 @@ class DataPreprocessor:
                 ano = 2024
                 mapa = self.mapa_2024
             else:
-                # [MELHORIA] Aviso caso entre uma aba desconhecida (ex: "Planilha1" ou "2025")
                 logger.warning(f"Aba '{nome_aba}' ignorada: Ano não identificado no nome ou fora do escopo (2022-2024).")
-                continue # Pula para a próxima iteração do loop
+                continue 
 
             if ano:
                 logger.debug(f"Processando aba: {nome_aba} (Ano: {ano})")
-                # Remove colunas duplicadas
                 df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
                 
-                # Seleciona e renomeia
                 cols = [c for c in mapa.keys() if c in df_temp.columns]
                 df_clean = df_temp[cols].rename(columns=mapa)
                 df_clean['ANO_DATATHON'] = ano
                 
-                # Cria IPP nulo se não existir (caso 2022)
                 if 'IPP' not in df_clean.columns:
                     df_clean['IPP'] = np.nan
                     
@@ -81,34 +108,40 @@ class DataPreprocessor:
             
         df_final = pd.concat(dfs, ignore_index=True)
         
-        # --- APLICAÇÃO DAS LIMPEZAS ---
         df_final = self._clean_data(df_final)
         
         logger.info(f"Pré-processamento concluído. Shape final: {df_final.shape}")
         return df_final
 
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        # 1. Padronizar Pedra
-        correcoes = {'Agata': 'Ágata'}
+        """Aplica regras específicas de limpeza de dados.
+
+        Trata inconsistências conhecidas nas colunas 'PEDRA', 'IDADE',
+        'FASE' e 'RA'.
+
+        Args:
+            df (pd.DataFrame): DataFrame consolidado bruto.
+
+        Returns:
+            pd.DataFrame: DataFrame limpo pronto para engenharia de features.
+        """
         if 'PEDRA' in df.columns:
+            correcoes = {'Agata': 'Ágata'}
             df['PEDRA'] = df['PEDRA'].replace(correcoes)
             pedras_validas = ['Quartzo', 'Ágata', 'Ametista', 'Topázio']
             df = df[df['PEDRA'].isin(pedras_validas)].copy()
 
-        # 2. Limpeza de IDADE
         if 'IDADE' in df.columns:
             df['IDADE'] = df['IDADE'].astype(str)
             mask_datas = df['IDADE'].str.startswith('1900-')
             df.loc[mask_datas, 'IDADE'] = pd.to_datetime(df.loc[mask_datas, 'IDADE'], errors='coerce').dt.day
             df['IDADE'] = pd.to_numeric(df['IDADE'], errors='coerce')
 
-        # 3. Limpeza de FASE e FASE_IDEAL
         for col in ['FASE', 'FASE_IDEAL']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.extract(r'(\d+)')
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 4. Limpeza de RA
         if 'RA' in df.columns:
             df['RA'] = df['RA'].astype(str).str.replace(r'\D', '', regex=True)
             df = df[df['RA'] != '']

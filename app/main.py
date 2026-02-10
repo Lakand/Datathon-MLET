@@ -1,18 +1,38 @@
 # app/main.py
+"""Ponto de entrada da API FastAPI.
+
+Este módulo configura a aplicação FastAPI, define o gerenciamento do ciclo de vida
+(inicialização e desligamento) e carrega os modelos de Machine Learning necessários
+para as rotas de inferência.
+"""
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import joblib
 import os
 
-# Importações do projeto
 from app.routes import router
 from app.monitor import init_db
 from src import config
-# Importante: Importar a classe FeatureEngineer para o joblib não falhar na hora de carregar o pipeline
 from src.feature_engineering import FeatureEngineer 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Gerencia o ciclo de vida da aplicação FastAPI.
+
+    Executa ações de inicialização (startup) e finalização (shutdown):
+    1. Startup:
+       - Inicializa o banco de dados de monitoramento/logs.
+       - Tenta carregar o modelo treinado e o pipeline de engenharia de features
+         do disco. Se os arquivos não existirem, define o estado como None e
+         emite um aviso sugerindo o treinamento.
+    
+    2. Shutdown:
+       - Executa procedimentos de limpeza (se houver).
+
+    Args:
+        app (FastAPI): A instância da aplicação.
+    """
     # --- STARTUP ---
     print("Iniciando API...")
     

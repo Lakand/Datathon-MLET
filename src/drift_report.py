@@ -1,4 +1,12 @@
 # src/drift_report.py
+"""Módulo de Monitoramento e Relatório de Data Drift.
+
+Este módulo é responsável por comparar os dados utilizados no treinamento
+(referência) com os dados recebidos em produção (armazenados no banco de dados),
+gerando um relatório HTML detalhado sobre o desvio (drift) das distribuições
+utilizando a biblioteca Evidently.
+"""
+
 import os
 import logging
 import pandas as pd
@@ -8,21 +16,26 @@ from evidently.report import Report
 from evidently.metric_preset import DataDriftPreset
 from evidently import ColumnMapping
 
-# Importações do projeto
 from src import config
 from src.utils import load_data
 from src.preprocessing import DataPreprocessor
 
-# Configura logger local
 logger = logging.getLogger(__name__)
 
-# Configurações de Caminhos
 DB_PATH = "monitoring.db"
-# Salva dentro da pasta docs para organização
 REPORT_PATH = os.path.join(config.BASE_DIR, "docs", "drift_report.html")
 
-def load_production_data():
-    """Lê os logs do SQLite da API e transforma em DataFrame."""
+def load_production_data() -> pd.DataFrame:
+    """Extrai e estrutura os logs de produção do banco de dados SQLite.
+
+    Lê a tabela de predições, decodifica o payload JSON de entrada e
+    consolida as informações em um DataFrame para análise.
+
+    Returns:
+        pd.DataFrame: Um DataFrame contendo as features de entrada e a
+        classe predita para cada requisição feita à API. Retorna um
+        DataFrame vazio em caso de erro ou base vazia.
+    """
     if not os.path.exists(DB_PATH):
         logger.warning("Banco de dados de monitoramento não encontrado.")
         return pd.DataFrame()
@@ -39,12 +52,10 @@ def load_production_data():
     if df_logs.empty:
         return pd.DataFrame()
 
-    # Expande o JSON armazenado
     dados_expandidos = []
     for _, row in df_logs.iterrows():
         try:
             data_dict = json.loads(row['input_data'])
-            # Adiciona a predição como coluna para análise
             data_dict['PEDRA_PREVISTA'] = row['predicted_pedra'] 
             dados_expandidos.append(data_dict)
         except json.JSONDecodeError:
@@ -52,10 +63,19 @@ def load_production_data():
 
     return pd.DataFrame(dados_expandidos)
 
-def generate_report():
-    """
-    Gera o relatório de Data Drift comparando Treino vs Produção.
-    Retorna: Caminho do arquivo HTML gerado ou None se falhar.
+def generate_report() -> str | None:
+    """Gera o relatório de Data Drift (Treino vs Produção).
+
+    Executa o pipeline de comparação utilizando o Evidently:
+    1. Carrega os dados de referência (dataset original de treino).
+    2. Carrega os dados atuais (logs de produção).
+    3. Mapeia as colunas numéricas e categóricas.
+    4. Calcula métricas de drift estatístico.
+    5. Exporta o resultado para um arquivo HTML.
+
+    Returns:
+        str | None: O caminho absoluto do arquivo HTML gerado em caso de sucesso,
+        ou None (ou mensagem de erro) caso falhe.
     """
     logger.info("1. Carregando dados de REFERÊNCIA (Treino)...")
     try:
@@ -71,19 +91,15 @@ def generate_report():
     
     if df_prod.empty:
         logger.warning("Sem dados de produção suficientes para gerar relatório.")
-        # Retorna erro amigável para a API
         return "SEM_DADOS"
 
-    # --- Interseção de Colunas ---
     colunas_comuns = [c for c in df_ref.columns if c in df_prod.columns]
     
-    # Remove targets da análise de input drift se necessário
     if 'PEDRA' in colunas_comuns:
         colunas_comuns.remove('PEDRA')
         
     logger.info(f"Colunas analisadas: {colunas_comuns}")
 
-    # --- Configuração do Evidently ---
     col_mapping = ColumnMapping()
     
     colunas_ignorar = ['RA', 'PEDRA', 'PEDRA_PREVISTA']
@@ -95,7 +111,6 @@ def generate_report():
     if 'GENERO' in colunas_comuns:
         col_mapping.categorical_features = ['GENERO']
 
-    # --- Geração ---
     logger.info("Calculando Drift...")
     report = Report(metrics=[DataDriftPreset()])
     
