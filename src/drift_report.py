@@ -1,24 +1,20 @@
 # src/drift_report.py
-"""Módulo de Monitoramento e Relatório de Data Drift.
-
-Este módulo é responsável por comparar os dados utilizados no treinamento
-(referência) com os dados recebidos em produção (armazenados no banco de dados),
-gerando um relatório HTML detalhado sobre o desvio (drift) das distribuições
-utilizando a biblioteca Evidently.
-"""
+"""Módulo de Drift Report - VERSÃO VALIDAÇÃO (Train vs Test)."""
 
 import os
 import logging
 import pandas as pd
 import sqlite3
 import json
+import numpy as np
 from evidently.report import Report
 from evidently.metric_preset import DataDriftPreset
 from evidently import ColumnMapping
 
 from src import config
-from src.utils import load_data
+from src.utils import load_data, load_artifact
 from src.preprocessing import DataPreprocessor
+from src.feature_engineering import FeatureEngineer
 
 logger = logging.getLogger(__name__)
 
@@ -26,27 +22,18 @@ DB_PATH = "monitoring.db"
 REPORT_PATH = os.path.join(config.BASE_DIR, "docs", "drift_report.html")
 
 def load_production_data() -> pd.DataFrame:
-    """Extrai e estrutura os logs de produção do banco de dados SQLite.
-
-    Lê a tabela de predições, decodifica o payload JSON de entrada e
-    consolida as informações em um DataFrame para análise.
-
-    Returns:
-        pd.DataFrame: Um DataFrame contendo as features de entrada e a
-        classe predita para cada requisição feita à API. Retorna um
-        DataFrame vazio em caso de erro ou base vazia.
-    """
+    """Carrega dados de produção do banco."""
     if not os.path.exists(DB_PATH):
-        logger.warning("Banco de dados de monitoramento não encontrado.")
+        logger.warning("Banco de dados não encontrado.")
         return pd.DataFrame()
 
     try:
         conn = sqlite3.connect(DB_PATH)
-        query = "SELECT input_data, predicted_pedra FROM predictions"
+        query = "SELECT input_data FROM predictions"
         df_logs = pd.read_sql_query(query, conn)
         conn.close()
     except Exception as e:
-        logger.error(f"Erro ao ler banco de dados: {e}")
+        logger.error(f"Erro ao ler banco: {e}")
         return pd.DataFrame()
 
     if df_logs.empty:
@@ -56,110 +43,179 @@ def load_production_data() -> pd.DataFrame:
     for _, row in df_logs.iterrows():
         try:
             data_dict = json.loads(row['input_data'])
-            # Adiciona a predição como se fosse a coluna alvo para monitoramento
-            data_dict['PEDRA_PREVISTA'] = row['predicted_pedra'] 
             dados_expandidos.append(data_dict)
         except json.JSONDecodeError:
             continue
 
     return pd.DataFrame(dados_expandidos)
 
+def apply_feature_engineering_transform(df: pd.DataFrame, fe: FeatureEngineer) -> pd.DataFrame:
+    """Aplica o FeatureEngineer e retorna DataFrame transformado."""
+    try:
+        X_scaled, _ = fe.transform(df)
+        df_transformed = pd.DataFrame(X_scaled, columns=fe.cols_treino)
+        return df_transformed
+    except Exception as e:
+        logger.error(f"Erro ao aplicar feature engineering: {e}")
+        raise
+
 def generate_report() -> str | None:
-    """Gera o relatório de Data Drift (Treino vs Produção)."""
+    """Gera relatório de drift.
     
-    # 1. Carregando Referência
-    logger.info("1. Carregando dados de REFERÊNCIA (Treino)...")
+    ESTRATÉGIA:
+    1. Se houver >= 100 registros de produção → Compara Train vs Produção
+    2. Se houver < 100 registros → Compara Train vs Test (validação)
+    """
+    
+    logger.info("=" * 80)
+    logger.info("DRIFT REPORT - VERSÃO INTELIGENTE")
+    logger.info("=" * 80)
+    
+    # ========================================================================
+    # 1. CARREGAR DADOS DE REFERÊNCIA (TREINO)
+    # ========================================================================
+    logger.info("1. Carregando dados de TREINO...")
     try:
         dict_abas = load_data(str(config.RAW_DATA_PATH))
         preprocessor = DataPreprocessor()
+        df_ref_raw = preprocessor.run(dict_abas)
         
-        # Limpa os dados de treino
-        df_ref = preprocessor.run(dict_abas)
-        
-        # === FIX: Criar coluna de predição na Referência ===
-        # O Evidently precisa que a coluna de 'prediction' exista em AMBOS os datasets.
-        # No treino, a nossa "predição perfeita" (ground truth) é a coluna PEDRA.
-        # Então duplicamos ela com o nome esperado.
-        if 'PEDRA' in df_ref.columns:
-            df_ref['PEDRA_PREVISTA'] = df_ref['PEDRA']
-        else:
-            logger.error("Coluna PEDRA não encontrada nos dados de referência.")
-            return None
-        # ===================================================
+        df_ref_raw = df_ref_raw.dropna(subset=['RA', 'PEDRA'])
+        df_ref_raw = df_ref_raw[df_ref_raw['PEDRA'].isin(config.MAPA_PEDRA.keys())]
+        logger.info(f"   Registros de treino: {len(df_ref_raw)}")
         
     except Exception as e:
-        logger.error(f"Erro ao carregar dados de treino: {e}")
+        logger.error(f"Erro ao carregar treino: {e}")
         return None
 
-    # 2. Carregando Produção
-    logger.info("2. Carregando dados de PRODUÇÃO (Logs)...")
+    # ========================================================================
+    # 2. CARREGAR FEATURE ENGINEER
+    # ========================================================================
+    logger.info("2. Carregando FeatureEngineer...")
+    try:
+        fe = load_artifact(config.PIPELINE_PATH)
+        logger.info(f"   Pipeline carregado com sucesso")
+    except FileNotFoundError:
+        logger.error("   Pipeline não encontrado! Execute /train primeiro.")
+        return None
+
+    # ========================================================================
+    # 3. TRANSFORMAR DADOS DE TREINO
+    # ========================================================================
+    logger.info("3. Transformando dados de TREINO...")
+    try:
+        df_ref_transformed = apply_feature_engineering_transform(df_ref_raw, fe)
+        logger.info(f"   Shape: {df_ref_transformed.shape}")
+    except Exception as e:
+        logger.error(f"Erro ao transformar treino: {e}")
+        return None
+
+    # ========================================================================
+    # 4. DECIDIR ESTRATÉGIA: PRODUÇÃO OU TESTE?
+    # ========================================================================
     df_prod_raw = load_production_data()
     
-    if df_prod_raw.empty:
-        logger.warning("Sem dados de produção suficientes para gerar relatório.")
-        return "SEM_DADOS"
+    if len(df_prod_raw) >= 100:
+        # Temos dados suficientes de produção
+        mode = "PRODUCTION"
+        logger.info(f"4. Modo: PRODUÇÃO ({len(df_prod_raw)} registros)")
+        df_current_raw = df_prod_raw
+        
+    else:
+        # Poucos dados de produção, usar dataset de teste
+        mode = "VALIDATION"
+        logger.info(f"4. Modo: VALIDAÇÃO (usando dataset de teste)")
+        logger.info(f"   Produção tem apenas {len(df_prod_raw)} registros (< 100)")
+        
+        try:
+            df_test = pd.read_csv(config.TEST_DATA_PATH)
+            df_current_raw = df_test
+            logger.info(f"   Dataset de teste carregado: {len(df_current_raw)} registros")
+        except FileNotFoundError:
+            logger.error("   Dataset de teste não encontrado! Execute /train primeiro.")
+            return None
 
-    # Pré-processamento dos logs
-    logger.info("Pré-processando dados de produção para compatibilidade...")
+    # ========================================================================
+    # 5. LIMPAR E TRANSFORMAR DADOS ATUAIS
+    # ========================================================================
+    logger.info(f"5. Processando dados {'de PRODUÇÃO' if mode == 'PRODUCTION' else 'de TESTE'}...")
+    
     try:
-        df_prod = preprocessor.clean_dataframe(df_prod_raw)
+        # Limpar
+        if mode == "PRODUCTION":
+            df_current_clean = preprocessor.clean_dataframe(df_current_raw)
+        else:
+            df_current_clean = df_current_raw  # Teste já está limpo
+        
+        # Transformar
+        df_current_transformed = apply_feature_engineering_transform(df_current_clean, fe)
+        logger.info(f"   Shape: {df_current_transformed.shape}")
+        
+        # Estatísticas comparativas
+        logger.info("   Comparação de médias:")
+        for col in df_ref_transformed.columns[:5]:
+            ref_mean = df_ref_transformed[col].mean()
+            curr_mean = df_current_transformed[col].mean()
+            diff = abs(ref_mean - curr_mean)
+            status = "OK" if diff < 0.3 else "DRIFT"
+            logger.info(f"      {col}: ref={ref_mean:.3f}, curr={curr_mean:.3f} [{status}]")
+            
     except Exception as e:
-        logger.error(f"Erro ao limpar dados de produção: {e}")
+        logger.error(f"Erro ao processar dados atuais: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
-    # Define colunas comuns para análise
-    # (Excluímos as colunas de target/predição da lista de features comuns para não duplicar no mapping)
-    colunas_comuns = [c for c in df_ref.columns if c in df_prod.columns]
-    colunas_ignorar = ['RA', 'PEDRA', 'PEDRA_PREVISTA', 'ANO_DATATHON']
+    # ========================================================================
+    # 6. GERAR RELATÓRIO
+    # ========================================================================
+    logger.info("6. Gerando relatório Evidently...")
     
-    # Remove as colunas ignoradas da lista de colunas comuns
-    colunas_comuns = [c for c in colunas_comuns if c not in colunas_ignorar]
-        
-    logger.info(f"Colunas analisadas para Drift: {colunas_comuns}")
-
-    # Configuração do Evidently
     col_mapping = ColumnMapping()
+    col_mapping.numerical_features = df_ref_transformed.columns.tolist()
+    col_mapping.categorical_features = []
     
-    # Define numéricas automaticamente
-    col_mapping.numerical_features = [
-        c for c in colunas_comuns 
-        if pd.api.types.is_numeric_dtype(df_ref[c])
-    ]
-    
-    # Define categóricas
-    if 'GENERO' in colunas_comuns:
-        col_mapping.categorical_features = ['GENERO']
-
-    # Mapeamento da Predição
-    # Agora ambos os DataFrames possuem 'PEDRA_PREVISTA'
-    if 'PEDRA_PREVISTA' in df_ref.columns and 'PEDRA_PREVISTA' in df_prod.columns:
-        col_mapping.prediction = 'PEDRA_PREVISTA'
-
-    logger.info("Calculando Drift...")
     report = Report(metrics=[DataDriftPreset()])
     
     try:
-        # Seleciona apenas colunas relevantes para passar ao Evidently
-        cols_ref = colunas_comuns + ['PEDRA_PREVISTA']
-        cols_prod = colunas_comuns + ['PEDRA_PREVISTA']
+        df_ref_final = df_ref_transformed.fillna(0)
+        df_current_final = df_current_transformed.fillna(0)
         
         report.run(
-            reference_data=df_ref[cols_ref], 
-            current_data=df_prod[cols_prod],
+            reference_data=df_ref_final,
+            current_data=df_current_final,
             column_mapping=col_mapping
         )
         
         os.makedirs(os.path.dirname(REPORT_PATH), exist_ok=True)
         report.save_html(REPORT_PATH)
-        logger.info(f"Relatório salvo com sucesso em: {REPORT_PATH}")
+        
+        logger.info("=" * 80)
+        if mode == "PRODUCTION":
+            logger.info("RELATÓRIO GERADO: Train vs Produção")
+        else:
+            logger.info("RELATÓRIO DE VALIDAÇÃO GERADO: Train vs Test")
+            logger.info("NOTA: Para análise real, aguarde 100+ registros de produção")
+        logger.info(f"Local: {REPORT_PATH}")
+        logger.info("=" * 80)
         
         return REPORT_PATH
         
     except Exception as e:
-        logger.error(f"Erro ao executar Evidently: {e}")
+        logger.error(f"Erro ao gerar relatório: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return None
 
 if __name__ == "__main__":
-    generate_report()
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    
+    result = generate_report()
+    
+    if result:
+        print(f"\nRelatorio: {result}\n")
+    else:
+        print("\nErro ao gerar relatorio\n")

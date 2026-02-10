@@ -21,6 +21,9 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
 
     Realiza o pré-processamento focado em preparação para redes neurais,
     lidando com valores ausentes pela mediana e normalizando as variáveis.
+    
+    IMPORTANTE: Assume que os dados já foram limpos pelo DataPreprocessor,
+    incluindo a conversão de GENERO de string para numérico (0/1).
     """
 
     def __init__(self):
@@ -46,7 +49,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         ajusta o StandardScaler aos dados processados.
 
         Args:
-            df (pd.DataFrame): DataFrame de treino.
+            df (pd.DataFrame): DataFrame de treino (já limpo pelo DataPreprocessor).
             y (pd.Series, optional): Variável alvo (não utilizada no fit, mantida
                 para compatibilidade com pipelines do sklearn).
 
@@ -54,11 +57,15 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
             FeatureEngineer: A própria instância ajustada.
         """
         logger.info("Ajustando (Fitting) FeatureEngineer...")
+        
+        # Calcula medianas para todas as colunas numéricas
+        # (GENERO já deve estar como numérico após preprocessing)
         cols_numericas = df.select_dtypes(include=[np.number]).columns
         
         for col in cols_numericas:
             self.medianas[col] = df[col].median()
-            
+        
+        # Prepara os dados e ajusta o scaler
         df_temp = self._transform_logic(df, fit_mode=True)
         self.scaler.fit(df_temp[self.cols_treino])
         
@@ -68,11 +75,13 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
     def transform(self, df: pd.DataFrame) -> Tuple[np.ndarray, Optional[pd.Series]]:
         """Transforma os dados aplicando as estatísticas aprendidas.
 
-        Aplica imputação de nulos, mapeamento de gênero e normalização.
+        Aplica imputação de nulos com as medianas calculadas no fit
+        e normalização via StandardScaler.
+        
         Também processa a variável alvo 'PEDRA' se estiver presente.
 
         Args:
-            df (pd.DataFrame): DataFrame de entrada.
+            df (pd.DataFrame): DataFrame de entrada (já limpo pelo DataPreprocessor).
 
         Returns:
             Tuple[np.ndarray, Optional[pd.Series]]: Uma tupla contendo:
@@ -85,10 +94,14 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         if not self.is_fitted:
             logger.error("Tentativa de transformação sem fit prévio.")
             raise RuntimeError("FeatureEngineer não treinado!")
-            
+        
+        # Aplica imputação e preparação
         df_proc = self._transform_logic(df, fit_mode=False)
+        
+        # Normaliza via StandardScaler
         X_scaled = self.scaler.transform(df_proc[self.cols_treino])
         
+        # Processa target se existir
         y = None
         if 'PEDRA' in df_proc.columns:
             y = df_proc['PEDRA'].map(config.MAPA_PEDRA)
@@ -96,31 +109,35 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X_scaled, y
 
     def _transform_logic(self, df: pd.DataFrame, fit_mode: bool = False) -> pd.DataFrame:
-        """Aplica a lógica de limpeza e imputação (método interno).
+        """Aplica a lógica de imputação de valores ausentes (método interno).
+        
+        NOTA: Este método NÃO faz conversão de tipos. Assume que:
+        - GENERO já está como numérico (0/1) após DataPreprocessor
+        - Todas as outras colunas já foram limpas e convertidas
+        
+        Responsabilidade deste método:
+        - Criar colunas faltantes (se necessário)
+        - Imputar valores nulos com medianas
 
         Args:
             df (pd.DataFrame): DataFrame a ser processado.
-            fit_mode (bool): Flag indicativo (atualmente não altera lógica, mas
-                pode ser usado para diferenciar comportamento em treino/teste).
+            fit_mode (bool): Flag indicativo (para futuras extensões).
 
         Returns:
-            pd.DataFrame: DataFrame com valores preenchidos e codificados.
+            pd.DataFrame: DataFrame com valores nulos imputados.
         """
         df = df.copy()
         
+        # Para cada coluna de treino, garantir que existe e imputar nulos
         for col in self.cols_treino:
-            if col == 'GENERO': continue
-            
+            # Se a coluna não existir, criar com NaN
             if col not in df.columns:
                 df[col] = np.nan
             
-            val = self.medianas.get(col, 0)
-            df[col] = df[col].fillna(val)
-
-        if 'GENERO' in df.columns:
-            mapa_genero = {'Feminino': 1, 'Menina': 1, 'Masculino': 0, 'Menino': 0}
-            if df['GENERO'].dtype == 'object':
-                 df['GENERO'] = df['GENERO'].map(mapa_genero)
-            df['GENERO'] = df['GENERO'].fillna(0)
+            # Buscar mediana (ou 0 se não tiver sido calculada)
+            mediana = self.medianas.get(col, 0)
+            
+            # Imputar valores nulos
+            df[col] = df[col].fillna(mediana)
 
         return df

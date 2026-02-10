@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from app.schemas import AlunoInput
 from app.monitor import log_prediction
 from src.config import MAPA_PEDRA, MODEL_PATH, PIPELINE_PATH
+from src.preprocessing import DataPreprocessor
 from src.train import train_pipeline
 from src.evaluate import evaluate_model
 from src.drift_report import generate_report
@@ -62,7 +63,11 @@ def predict(request: Request, alunos: List[AlunoInput], background_tasks: Backgr
         # Converte a entrada (Pydantic) para DataFrame
         input_data = [aluno.dict() for aluno in alunos]
         df_input = pd.DataFrame(input_data)
-        
+
+        # Aplica o pré-processamento (conversão de GÊNERO, limpeza de tipos, etc.)
+        preprocessor = DataPreprocessor()
+        df_input = preprocessor.clean_dataframe(df_input)
+
         # Passa pelo Pipeline de Features (Scaler, Encoders, etc)
         X_scaled, _ = pipeline.transform(df_input)
         

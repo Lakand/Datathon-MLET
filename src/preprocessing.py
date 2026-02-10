@@ -119,6 +119,26 @@ class DataPreprocessor:
                 df[col] = df[col].astype(str).str.extract(r'(\d+)')
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
+
+            if 'GENERO' in df.columns:
+                # Mapeamento: Feminino/Menina = 1, Masculino/Menino = 0
+                mapa_genero = {
+                    'Feminino': 1, 
+                    'Menina': 1, 
+                    'Masculino': 0, 
+                    'Menino': 0
+                }
+                
+                # Se for string, mapeia
+                if df['GENERO'].dtype == 'object':
+                    df['GENERO'] = df['GENERO'].map(mapa_genero)
+                
+                # Converte para numérico (caso tenha valores não mapeados)
+                df['GENERO'] = pd.to_numeric(df['GENERO'], errors='coerce')
+                
+                # Preenche nulos com 0 (padrão Masculino)
+                df['GENERO'] = df['GENERO'].fillna(0)
+
         # 4. Limpeza de Notas e Indicadores (Forçar Numérico)
         # Isso evita que strings como "10,5" ou "N/A" quebrem o StandardScaler mais à frente
         cols_notas = ['NOTA_MAT', 'NOTA_PORT', 'NOTA_ING', 'IEG', 'IPS', 'IAA', 'IPV', 'IAN', 'IDA']
