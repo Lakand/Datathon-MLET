@@ -56,6 +56,7 @@ def load_production_data() -> pd.DataFrame:
     for _, row in df_logs.iterrows():
         try:
             data_dict = json.loads(row['input_data'])
+            # Adiciona a predição como se fosse a coluna alvo para monitoramento
             data_dict['PEDRA_PREVISTA'] = row['predicted_pedra'] 
             dados_expandidos.append(data_dict)
         except json.JSONDecodeError:
@@ -64,71 +65,100 @@ def load_production_data() -> pd.DataFrame:
     return pd.DataFrame(dados_expandidos)
 
 def generate_report() -> str | None:
-    """Gera o relatório de Data Drift (Treino vs Produção).
-
-    Executa o pipeline de comparação utilizando o Evidently:
-    1. Carrega os dados de referência (dataset original de treino).
-    2. Carrega os dados atuais (logs de produção).
-    3. Mapeia as colunas numéricas e categóricas.
-    4. Calcula métricas de drift estatístico.
-    5. Exporta o resultado para um arquivo HTML.
-
-    Returns:
-        str | None: O caminho absoluto do arquivo HTML gerado em caso de sucesso,
-        ou None (ou mensagem de erro) caso falhe.
-    """
+    """Gera o relatório de Data Drift (Treino vs Produção)."""
+    
+    # 1. Carregando Referência
     logger.info("1. Carregando dados de REFERÊNCIA (Treino)...")
     try:
         dict_abas = load_data(str(config.RAW_DATA_PATH))
         preprocessor = DataPreprocessor()
+        
+        # Limpa os dados de treino
         df_ref = preprocessor.run(dict_abas)
+        
+        # === FIX: Criar coluna de predição na Referência ===
+        # O Evidently precisa que a coluna de 'prediction' exista em AMBOS os datasets.
+        # No treino, a nossa "predição perfeita" (ground truth) é a coluna PEDRA.
+        # Então duplicamos ela com o nome esperado.
+        if 'PEDRA' in df_ref.columns:
+            df_ref['PEDRA_PREVISTA'] = df_ref['PEDRA']
+        else:
+            logger.error("Coluna PEDRA não encontrada nos dados de referência.")
+            return None
+        # ===================================================
+        
     except Exception as e:
         logger.error(f"Erro ao carregar dados de treino: {e}")
         return None
 
+    # 2. Carregando Produção
     logger.info("2. Carregando dados de PRODUÇÃO (Logs)...")
-    df_prod = load_production_data()
+    df_prod_raw = load_production_data()
     
-    if df_prod.empty:
+    if df_prod_raw.empty:
         logger.warning("Sem dados de produção suficientes para gerar relatório.")
         return "SEM_DADOS"
 
-    colunas_comuns = [c for c in df_ref.columns if c in df_prod.columns]
-    
-    if 'PEDRA' in colunas_comuns:
-        colunas_comuns.remove('PEDRA')
-        
-    logger.info(f"Colunas analisadas: {colunas_comuns}")
+    # Pré-processamento dos logs
+    logger.info("Pré-processando dados de produção para compatibilidade...")
+    try:
+        df_prod = preprocessor.clean_dataframe(df_prod_raw)
+    except Exception as e:
+        logger.error(f"Erro ao limpar dados de produção: {e}")
+        return None
 
+    # Define colunas comuns para análise
+    # (Excluímos as colunas de target/predição da lista de features comuns para não duplicar no mapping)
+    colunas_comuns = [c for c in df_ref.columns if c in df_prod.columns]
+    colunas_ignorar = ['RA', 'PEDRA', 'PEDRA_PREVISTA', 'ANO_DATATHON']
+    
+    # Remove as colunas ignoradas da lista de colunas comuns
+    colunas_comuns = [c for c in colunas_comuns if c not in colunas_ignorar]
+        
+    logger.info(f"Colunas analisadas para Drift: {colunas_comuns}")
+
+    # Configuração do Evidently
     col_mapping = ColumnMapping()
     
-    colunas_ignorar = ['RA', 'PEDRA', 'PEDRA_PREVISTA']
+    # Define numéricas automaticamente
     col_mapping.numerical_features = [
         c for c in colunas_comuns 
-        if c not in colunas_ignorar and pd.api.types.is_numeric_dtype(df_ref[c])
+        if pd.api.types.is_numeric_dtype(df_ref[c])
     ]
     
+    # Define categóricas
     if 'GENERO' in colunas_comuns:
         col_mapping.categorical_features = ['GENERO']
+
+    # Mapeamento da Predição
+    # Agora ambos os DataFrames possuem 'PEDRA_PREVISTA'
+    if 'PEDRA_PREVISTA' in df_ref.columns and 'PEDRA_PREVISTA' in df_prod.columns:
+        col_mapping.prediction = 'PEDRA_PREVISTA'
 
     logger.info("Calculando Drift...")
     report = Report(metrics=[DataDriftPreset()])
     
     try:
+        # Seleciona apenas colunas relevantes para passar ao Evidently
+        cols_ref = colunas_comuns + ['PEDRA_PREVISTA']
+        cols_prod = colunas_comuns + ['PEDRA_PREVISTA']
+        
         report.run(
-            reference_data=df_ref[colunas_comuns], 
-            current_data=df_prod[colunas_comuns],
+            reference_data=df_ref[cols_ref], 
+            current_data=df_prod[cols_prod],
             column_mapping=col_mapping
         )
         
         os.makedirs(os.path.dirname(REPORT_PATH), exist_ok=True)
         report.save_html(REPORT_PATH)
-        logger.info(f"Relatório salvo em: {REPORT_PATH}")
+        logger.info(f"Relatório salvo com sucesso em: {REPORT_PATH}")
         
         return REPORT_PATH
         
     except Exception as e:
         logger.error(f"Erro ao executar Evidently: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 if __name__ == "__main__":

@@ -1,10 +1,5 @@
 # src/preprocessing.py
-"""Módulo de Pré-processamento de Dados Brutos.
-
-Este módulo é responsável pela consolidação e limpeza inicial dos dados
-provenientes de arquivos Excel com múltiplas abas (anos). Ele padroniza
-os nomes das colunas e unifica os dados em um único DataFrame.
-"""
+"""Módulo de Pré-processamento de Dados Brutos."""
 
 import pandas as pd
 import numpy as np
@@ -14,19 +9,9 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 class DataPreprocessor:
-    """Gerencia o pré-processamento dos datasets do Passos Mágicos.
-
-    Responsável por identificar o esquema de colunas de cada ano (2022-2024),
-    renomear para um padrão interno único e realizar limpezas básicas de tipos
-    de dados.
-    """
+    """Gerencia o pré-processamento dos datasets do Passos Mágicos."""
 
     def __init__(self):
-        """Inicializa o DataPreprocessor com os mapas de colunas.
-
-        Define dicionários que mapeiam os nomes originais das colunas em cada
-        aba do Excel para os nomes padronizados do sistema.
-        """
         self.mapa_2022 = {
             'RA': 'RA', 'Fase': 'FASE', 'Gênero': 'GENERO', 'Idade 22': 'IDADE', 
             'Ano ingresso': 'ANO_INGRESSO', 'IAA': 'IAA', 'IEG': 'IEG', 
@@ -52,27 +37,30 @@ class DataPreprocessor:
             'IPP': 'IPP', 'Pedra 2024': 'PEDRA'
         }
 
+    def clean_dataframe(self, df: pd.DataFrame, ano_default: int = 2024) -> pd.DataFrame:
+        """Limpa um DataFrame avulso (ex: dados de produção/API)."""
+        df = df.copy()
+
+        # Tenta aplicar renomeação baseada nos mapas conhecidos
+        for mapa in [self.mapa_2024, self.mapa_2023, self.mapa_2022]:
+            cols_to_rename = {k: v for k, v in mapa.items() if k in df.columns}
+            if cols_to_rename:
+                df = df.rename(columns=cols_to_rename)
+
+        if 'ANO_DATATHON' not in df.columns:
+            df['ANO_DATATHON'] = ano_default
+
+        if 'IPP' not in df.columns:
+            df['IPP'] = np.nan
+
+        return self._clean_data(df)
+
     def run(self, dict_abas: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-        """Executa o pipeline de pré-processamento nas abas fornecidas.
-
-        Itera sobre o dicionário de DataFrames, identifica o ano correspondente
-        pelo nome da aba, seleciona/renomeia colunas e concatena os resultados.
-
-        Args:
-            dict_abas (Dict[str, pd.DataFrame]): Dicionário onde as chaves são os
-                nomes das abas e os valores são DataFrames brutos.
-
-        Returns:
-            pd.DataFrame: DataFrame único consolidado e limpo.
-
-        Raises:
-            ValueError: Se nenhuma aba válida (contendo 2022, 2023 ou 2024) for encontrada.
-        """
+        """Executa o pipeline de pré-processamento nas abas do Excel."""
         logger.info("Iniciando pré-processamento das abas...")
         dfs = []
         for nome_aba, df in dict_abas.items():
             df_temp = df.copy()
-            
             ano = None
             mapa = None
             
@@ -86,13 +74,11 @@ class DataPreprocessor:
                 ano = 2024
                 mapa = self.mapa_2024
             else:
-                logger.warning(f"Aba '{nome_aba}' ignorada: Ano não identificado no nome ou fora do escopo (2022-2024).")
+                logger.warning(f"Aba '{nome_aba}' ignorada.")
                 continue 
 
             if ano:
-                logger.debug(f"Processando aba: {nome_aba} (Ano: {ano})")
                 df_temp = df_temp.loc[:, ~df_temp.columns.duplicated()]
-                
                 cols = [c for c in mapa.keys() if c in df_temp.columns]
                 df_clean = df_temp[cols].rename(columns=mapa)
                 df_clean['ANO_DATATHON'] = ano
@@ -103,45 +89,44 @@ class DataPreprocessor:
                 dfs.append(df_clean)
         
         if not dfs:
-            logger.error("Nenhuma aba válida encontrada no arquivo Excel.")
             raise ValueError("Nenhuma aba válida encontrada!")
             
         df_final = pd.concat(dfs, ignore_index=True)
-        
-        df_final = self._clean_data(df_final)
-        
-        logger.info(f"Pré-processamento concluído. Shape final: {df_final.shape}")
-        return df_final
+        return self._clean_data(df_final)
 
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Aplica regras específicas de limpeza de dados.
-
-        Trata inconsistências conhecidas nas colunas 'PEDRA', 'IDADE',
-        'FASE' e 'RA'.
-
-        Args:
-            df (pd.DataFrame): DataFrame consolidado bruto.
-
-        Returns:
-            pd.DataFrame: DataFrame limpo pronto para engenharia de features.
-        """
+        """Aplica regras específicas de limpeza de dados."""
+        # 1. Limpeza da Pedra
         if 'PEDRA' in df.columns:
             correcoes = {'Agata': 'Ágata'}
             df['PEDRA'] = df['PEDRA'].replace(correcoes)
-            pedras_validas = ['Quartzo', 'Ágata', 'Ametista', 'Topázio']
-            df = df[df['PEDRA'].isin(pedras_validas)].copy()
+            # NOTA: O filtro de pedras válidas foi movido para o src/train.py
+            # para não deletar dados durante a inferência ou monitoramento.
 
+        # 2. Limpeza de Idade
         if 'IDADE' in df.columns:
             df['IDADE'] = df['IDADE'].astype(str)
             mask_datas = df['IDADE'].str.startswith('1900-')
-            df.loc[mask_datas, 'IDADE'] = pd.to_datetime(df.loc[mask_datas, 'IDADE'], errors='coerce').dt.day
+            if mask_datas.any():
+                df.loc[mask_datas, 'IDADE'] = pd.to_datetime(
+                    df.loc[mask_datas, 'IDADE'], errors='coerce'
+                ).dt.day
             df['IDADE'] = pd.to_numeric(df['IDADE'], errors='coerce')
 
+        # 3. Limpeza de Fases (extrair números)
         for col in ['FASE', 'FASE_IDEAL']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.extract(r'(\d+)')
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # 4. Limpeza de Notas e Indicadores (Forçar Numérico)
+        # Isso evita que strings como "10,5" ou "N/A" quebrem o StandardScaler mais à frente
+        cols_notas = ['NOTA_MAT', 'NOTA_PORT', 'NOTA_ING', 'IEG', 'IPS', 'IAA', 'IPV', 'IAN', 'IDA']
+        for col in cols_notas:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # 5. Limpeza de RA
         if 'RA' in df.columns:
             df['RA'] = df['RA'].astype(str).str.replace(r'\D', '', regex=True)
             df = df[df['RA'] != '']

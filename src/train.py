@@ -35,7 +35,7 @@ from src import config
 warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# Configuração de logging temporário para captura durante a execução do pipeline
+# Configuração de logging temporário
 temp_log_file = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
 temp_log_path = temp_log_file.name
 temp_log_file.close()
@@ -54,19 +54,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def plot_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, title: str = "Confusion Matrix") -> str:
-    """Gera e salva a matriz de confusão em um arquivo temporário.
-
-    Cria um heatmap utilizando Seaborn para visualizar o desempenho do classificador
-    em relação às classes reais versus preditas.
-
-    Args:
-        y_true (np.ndarray): Array com os rótulos verdadeiros.
-        y_pred (np.ndarray): Array com os rótulos preditos pelo modelo.
-        title (str, optional): Título do gráfico. Padrão é "Confusion Matrix".
-
-    Returns:
-        str: O caminho absoluto do arquivo de imagem (.png) gerado temporariamente.
-    """
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
@@ -84,24 +71,6 @@ def plot_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, title: str = "
     return temp_img.name
 
 def train_pipeline() -> dict:
-    """Executa o pipeline completo de treinamento e avaliação do modelo.
-
-    O pipeline consiste nas seguintes etapas:
-    1. Carregamento e pré-processamento dos dados brutos.
-    2. Divisão dos dados em treino e teste (respeitando grupos de alunos - RA).
-    3. Validação Cruzada (Stratified Group K-Fold) para estimativa robusta de métricas.
-    4. Treinamento do modelo final (MLPClassifier) com todo o conjunto de treino e SMOTE.
-    5. Avaliação no conjunto de teste reservado.
-    6. Registro de artefatos, métricas e logs no MLflow.
-
-    Returns:
-        dict: Um dicionário contendo o status da execução, métricas principais
-        (F1, Acurácia) e caminhos dos artefatos salvos.
-
-    Raises:
-        Exception: Propaga qualquer exceção crítica que ocorra durante o pipeline
-        para ser tratada pelo chamador (ex: API).
-    """
     mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
     
     temp_img_path = None
@@ -120,7 +89,19 @@ def train_pipeline() -> dict:
             dict_abas = load_data(str(config.RAW_DATA_PATH))
             preprocessor = DataPreprocessor()
             df_clean = preprocessor.run(dict_abas)
-            df_clean = df_clean.dropna(subset=['RA']).reset_index(drop=True)
+
+            # === FIX CRÍTICO: Limpeza de Targets para o Treino ===
+            # Como o Preprocessor agora é permissivo (para o Drift Report),
+            # precisamos garantir aqui que o treino só use linhas com TARGET (PEDRA) válido.
+            # Remove linhas onde RA ou PEDRA são nulos
+            logger.info(f"Shape antes da limpeza de targets: {df_clean.shape}")
+            df_clean = df_clean.dropna(subset=['RA', 'PEDRA'])
+            
+            # Filtra apenas as pedras que estão mapeadas no config (remove erros de digitação/pedras fora do escopo)
+            df_clean = df_clean[df_clean['PEDRA'].isin(config.MAPA_PEDRA.keys())]
+            df_clean = df_clean.reset_index(drop=True)
+            logger.info(f"Shape pós limpeza de targets: {df_clean.shape}")
+            # ======================================================
             
             # Divisão Treino/Teste (GroupShuffleSplit para evitar data leakage por RA)
             splitter = GroupShuffleSplit(
@@ -128,6 +109,8 @@ def train_pipeline() -> dict:
                 n_splits=1, 
                 random_state=config.SPLIT_PARAMS['random_state']
             )
+            
+            # O split precisa que 'RA' esteja limpo (já garantido pelo dropna acima)
             train_idx, test_idx = next(splitter.split(df_clean, groups=df_clean['RA']))
             df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
             df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
@@ -210,22 +193,21 @@ def train_pipeline() -> dict:
             logger.critical(f"Erro no pipeline: {e}")
             raise e
         finally:
-            # Limpeza de arquivos temporários
             try:
                 for handler in logging.root.handlers:
                     handler.close()
                 if os.path.exists(temp_log_path):
                     os.remove(temp_log_path)
-            except Exception as e:
-                print(f"Erro ao limpar log: {e}")
+            except Exception:
+                pass
             
             try:
                 if temp_img_path and os.path.exists(temp_img_path):
                     os.remove(temp_img_path)
-            except Exception as e:
-                print(f"Erro ao limpar imagem: {e}")
+            except Exception:
+                pass
                 
     return metrics_summary
 
 if __name__ == "__main__":
-    print(train_pipeline())
+    train_pipeline()
