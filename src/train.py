@@ -23,7 +23,7 @@ import mlflow.sklearn
 
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
-from sklearn.metrics import f1_score, classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import f1_score, confusion_matrix, accuracy_score
 from imblearn.over_sampling import SMOTE
 
 from src.utils import load_data, save_artifact
