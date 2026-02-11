@@ -3,10 +3,6 @@ venv/
 .env
 .python-version
 
-# --- Dados ---
-data/
-*.xlsx
-*.csv
 
 # --- Arquivos Temporários e do Sistema ---
 __pycache__/
