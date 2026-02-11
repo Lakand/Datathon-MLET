@@ -51,7 +51,7 @@ MODEL_PARAMS = {
 SPLIT_PARAMS = {
     'test_size': 0.2,
     'random_state': 42,
-    'n_splits_cv': 10
+    'n_splits_cv': 5
 }
 
 # Mapeamento ordinal da variável alvo 'PEDRA'
