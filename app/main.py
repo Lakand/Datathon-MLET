@@ -31,14 +31,11 @@ async def lifespan(app: FastAPI):
     Args:
         app (FastAPI): A instância da aplicação.
     """
-    # --- STARTUP ---
     print("Iniciando API...")
     
-    # 1. Inicializa banco de logs
     init_db()
     print("Banco de monitoramento iniciado.")
     
-    # 2. Carrega Modelos
     try:
         app.state.model = joblib.load(config.MODEL_PATH)
         app.state.pipeline = joblib.load(config.PIPELINE_PATH)
@@ -52,7 +49,6 @@ async def lifespan(app: FastAPI):
         print(f"ERRO DESCONHECIDO ao carregar modelos: {e}")
         
     yield
-    # --- SHUTDOWN ---
     print("Desligando API...")
 
 app = FastAPI(
@@ -64,7 +60,6 @@ app = FastAPI(
 
 app.include_router(router)
 
-if __name__ == "__main__":
+if __name__ == "__main__": # pragma: no cover
     import uvicorn
-    # Roda servidor de desenvolvimento
     uvicorn.run(app, host="0.0.0.0", port=8000)
