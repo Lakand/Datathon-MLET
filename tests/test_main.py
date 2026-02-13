@@ -1,52 +1,76 @@
-# tests/test_main.py
-import pytest
-from unittest.mock import patch, MagicMock
+#tests/test_main.py
+"""Testes para o ciclo de vida (lifespan) da aplicação FastAPI.
+
+Este módulo valida o comportamento do gerenciador de contexto `lifespan`,
+garantindo que os recursos (banco de dados e modelos de ML) sejam
+inicializados corretamente ou tratados adequadamente em caso de falha.
+"""
+
+from unittest.mock import MagicMock, patch
+
 from fastapi import FastAPI
+import pytest
+
 from app.main import lifespan
 
-# Cria uma app fake para passar para o lifespan
 app_mock = FastAPI()
+
 
 @pytest.mark.asyncio
 async def test_lifespan_startup_success():
-    """Cenário 1: Sucesso - Carrega modelos e inicia DB."""
-    
-    # Mockamos o init_db para não criar arquivo real
-    # Mockamos o joblib para retornar um objeto dummy
-    with patch("app.main.init_db") as mock_init, \
-         patch("joblib.load", return_value="MODELO_CARREGADO") as mock_load:
-        
-        # Entra no contexto (simula o startup)
+    """Testa o cenário de sucesso na inicialização da aplicação.
+
+    Este teste simula o carregamento bem-sucedido do banco de dados e
+    dos modelos de Machine Learning (via joblib). Verifica se o estado
+    da aplicação (app.state) é preenchido corretamente com os objetos carregados.
+
+    Verificações:
+        - app.state.model deve conter o objeto retornado pelo mock.
+        - app.state.pipeline deve conter o objeto retornado pelo mock.
+        - init_db deve ser chamado exatamente uma vez.
+        - joblib.load deve ser chamado duas vezes (modelo e pipeline).
+    """
+    with patch("app.main.init_db") as mock_init, patch(
+        "joblib.load", return_value="MODELO_CARREGADO"
+    ) as mock_load:
         async with lifespan(app_mock):
-            # Verifica se definiu o estado corretamente
             assert app_mock.state.model == "MODELO_CARREGADO"
             assert app_mock.state.pipeline == "MODELO_CARREGADO"
-            
-            # Verifica se chamou as funções esperadas
+
             mock_init.assert_called_once()
-            assert mock_load.call_count == 2 # 1 pro model, 1 pro pipeline
+            assert mock_load.call_count == 2
+
 
 @pytest.mark.asyncio
 async def test_lifespan_startup_file_not_found():
-    """Cenário 2: Erro - Arquivos de modelo não existem."""
-    
-    with patch("app.main.init_db"), \
-         patch("joblib.load", side_effect=FileNotFoundError("Arquivo não achado")):
-        
+    """Testa o comportamento quando os arquivos de modelo não são encontrados.
+
+    Simula uma exceção `FileNotFoundError` ao tentar carregar os modelos via joblib.
+    O teste garante que a aplicação inicializa sem travar, mas mantém os atributos
+    de estado como `None`.
+
+    Verificações:
+        - app.state.model deve ser None.
+        - app.state.pipeline deve ser None.
+    """
+    with patch("app.main.init_db"), patch(
+        "joblib.load", side_effect=FileNotFoundError("Arquivo não achado")
+    ):
         async with lifespan(app_mock):
-            # O app deve iniciar, mas com estado None
             assert app_mock.state.model is None
             assert app_mock.state.pipeline is None
 
+
 @pytest.mark.asyncio
 async def test_lifespan_startup_generic_error():
-    """Cenário 3: Erro Genérico - Falha desconhecida no joblib."""
-    
-    with patch("app.main.init_db"), \
-         patch("joblib.load", side_effect=Exception("Erro fatal")):
-        
+    """Testa a robustez contra erros genéricos durante a inicialização.
+
+    Simula uma exceção genérica (`Exception`) durante o carregamento.
+    O objetivo é garantir que o bloco `try/except` capture o erro e permita
+    que a aplicação continue rodando (pass), evitando um crash fatal no startup.
+    """
+    with patch("app.main.init_db"), patch(
+        "joblib.load", side_effect=Exception("Erro fatal")
+    ):
         async with lifespan(app_mock):
-            # Deve capturar a exceção e não quebrar o teste
-            # O estado pode não ter sido definido ou ser o anterior, 
-            # mas o importante é passar pelo bloco 'except Exception'
             pass
