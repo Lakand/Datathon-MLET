@@ -105,8 +105,9 @@ A solução implementa uma **pipeline completa de Machine Learning** em produç�
 #### Via Pip
 
 ```bash
-# Clonar o repositório ou navegar até a pasta do projeto
-cd "Python/Fase 5"
+# Clonar o repositório do GitHub
+git clone https://github.com/Lakand/Datathon-MLET
+cd Datathon-MLET
 
 # Criar um ambiente virtual (opcional, mas recomendado)
 python -m venv venv
@@ -116,16 +117,6 @@ source venv/bin/activate  # No Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-#### Via Conda (Alternativa)
-
-```bash
-conda create -n passos-magicos python=3.10
-conda activate passos-magicos
-pip install -r requirements.txt
-```
-
----
-
 ### Deploy com Docker Compose (Recomendado)
 
 Este é o método mais simples para executar a aplicação em produção.
@@ -133,8 +124,9 @@ Este é o método mais simples para executar a aplicação em produção.
 #### 1. Build e Execução
 
 ```bash
-# Navegar até a pasta do projeto
-cd "Python/Fase 5"
+# Clonar o repositório do GitHub
+git clone https://github.com/Lakand/Datathon-MLET
+cd Datathon-MLET/"Python/Fase 5"
 
 # Build da imagem Docker
 docker-compose build
@@ -161,36 +153,41 @@ A aplicação será disponibilizada em **http://127.0.0.1:8000** com os seguinte
 - `./docs:/app/docs` - Relatórios gerados
 - `./mlruns:/app/mlruns` - Histórico de experimentos (MLflow)
 
----
+### Deploy na Plataforma Render
 
-### Deploy com Docker (Alternativa Manual)
+A API está hospedada e disponível no Render em:
 
-#### 1. Build da Imagem
+**🔗 URL Base: https://api-passos-magicos.onrender.com**
+
+#### Acessando a Documentação Interativa
+
+- **Swagger UI**: https://api-passos-magicos.onrender.com/docs
+- **ReDoc**: https://api-passos-magicos.onrender.com/redoc
+
+#### Exemplos de Requisições para Produção
+
+Substitua `http://127.0.0.1:8000` por `https://api-passos-magicos.onrender.com` nos exemplos anteriores.
+
+**Exemplo com cURL:**
 
 ```bash
-docker build -t passos-magicos-api:latest .
+curl -X POST "https://api-passos-magicos.onrender.com/predict" \
+  -H "Content-Type: application/json" \
+  -d '[{"RA": "123456", "IDADE": 14, "GENERO": "Menino", ...}]'
 ```
 
-#### 2. Execução do Container
+#### Monitoramento da API
 
-```bash
-docker run -d \
-  --name passos-magicos-api \
-  -p 8000:8000 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/models:/app/models \
-  -v $(pwd)/docs:/app/docs \
-  -v $(pwd)/mlruns:/app/mlruns \
-  -e PYTHONUNBUFFERED=1 \
-  -e DB_PATH=/app/data/monitoring.db \
-  passos-magicos-api:latest
-```
+- **Status**: Verifique a saúde da API em https://api-passos-magicos.onrender.com/health
+- **Logs**: Acessíveis através do painel do Render
+- **Alertas**: Configurados para downtime e erros
 
-#### 3. Acessar a API
+#### Limitações e Considerações
 
-- **URL Base**: http://127.0.0.1:8000
-- **Documentação Interativa (Swagger UI)**: http://127.0.0.1:8000/docs
-- **Documentação Alternativa (ReDoc)**: http://127.0.0.1:8000/redoc
+- ⏱️ **Cold starts**: Primeira requisição após inatividade pode levar alguns segundos
+- 🔄 **Uptime**: 99.9% garantido pela plataforma Render
+- 📦 **Armazenamento**: Dados de treinamento sincronizados automaticamente
+- 🔐 **HTTPS**: Todas as requisições são criptografadas
 
 ---
 
