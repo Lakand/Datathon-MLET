@@ -62,3 +62,6 @@ SPLIT_PARAMS = {
 
 # Mapeamento ordinal das classes da variável alvo.
 MAPA_PEDRA = {'Quartzo': 0, 'Ágata': 1, 'Ametista': 2, 'Topázio': 3}
+
+# Configurações de Monitoramento e Drift
+DRIFT_WINDOW_SIZE = 5000

@@ -27,11 +27,14 @@ logger = logging.getLogger(__name__)
 DB_PATH = "monitoring.db"
 REPORT_PATH = os.path.join(config.BASE_DIR, "docs", "drift_report.html")
 
-def load_production_data() -> pd.DataFrame:
-    """Carrega dados de produção do banco.
+def load_production_data(limit: int = config.DRIFT_WINDOW_SIZE) -> pd.DataFrame:
+    """Carrega os últimos N registros de produção do banco.
 
-    Recupera os logs de inferência armazenados no SQLite e reconstrói o 
-    DataFrame a partir das strings JSON enviadas para a API.
+    Implementa uma janela deslizante para evitar OOM (Out of Memory).
+    Usa 'ORDER BY rowid DESC' (SQLite) para pegar os dados mais recentes.
+
+    Args:
+        limit (int): Número máximo de registros recentes a carregar.
 
     Returns:
         pd.DataFrame: Dados brutos coletados em produção.
@@ -42,7 +45,9 @@ def load_production_data() -> pd.DataFrame:
 
     try:
         conn = sqlite3.connect(DB_PATH)
-        query = "SELECT input_data FROM predictions"
+
+        query = f"SELECT input_data FROM predictions ORDER BY rowid DESC LIMIT {limit}"
+        
         df_logs = pd.read_sql_query(query, conn)
         conn.close()
     except Exception as e:
@@ -133,7 +138,7 @@ def generate_report() -> str | None:
     
     if len(df_prod_raw) >= 100:
         mode = "PRODUCTION"
-        logger.info(f"4. Modo: PRODUÇÃO ({len(df_prod_raw)} registros)")
+        logger.info(f"4. Modo: PRODUÇÃO (Analisando os últimos {len(df_prod_raw)} registros)")
         df_current_raw = df_prod_raw
     else:
         mode = "VALIDATION"
@@ -155,7 +160,7 @@ def generate_report() -> str | None:
         if mode == "PRODUCTION":
             df_current_clean = preprocessor.clean_dataframe(df_current_raw)
         else:
-            df_current_clean = df_current_raw  # Teste já está limpo
+            df_current_clean = df_current_raw
         
         df_current_transformed = apply_feature_engineering_transform(df_current_clean, fe)
         logger.info(f"   Shape: {df_current_transformed.shape}")
