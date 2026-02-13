@@ -1,58 +1,64 @@
 # src/config.py
-"""Módulo de Configuração Central.
+"""Módulo de Configuração Central do Projeto Passos Mágicos.
 
-Este módulo define as constantes globais, caminhos de diretórios,
-hiperparâmetros do modelo e configurações do MLflow utilizados em todo o projeto.
-Centraliza as definições para facilitar a manutenção e garantir consistência
-entre os ambientes de treino e produção.
+Este módulo define constantes globais, caminhos de diretórios, hiperparâmetros 
+do modelo e configurações do MLflow. Centraliza as definições para garantir 
+consistência entre os ambientes de treino e produção.
 """
 
 from pathlib import Path
 
-# --- Definições de Estrutura de Diretórios ---
+# ==============================================================================
+# ESTRUTURA DE DIRETÓRIOS
+# ==============================================================================
 
-# Define a raiz do projeto baseada na localização deste arquivo
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
 
-# Garante a existência do diretório de modelos para evitar erros de salvamento
+# Criação preventiva do diretório de modelos para operações de escrita.
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- Caminhos de Arquivos e Artefatos ---
+# ==============================================================================
+# ARTEFATOS E DADOS
+# ==============================================================================
 
-# Arquivo Excel original contendo os dados brutos (2022-2024)
+# Localização da fonte de dados original (formato Excel).
 RAW_DATA_PATH = DATA_DIR / "BASE DE DADOS PEDE 2024 - DATATHON.xlsx"
 
-# Dataset de teste (holdout) gerado após o split
+# Caminho para o conjunto de dados de teste (holdout).
 TEST_DATA_PATH = DATA_DIR / "test_dataset.csv"
 
-# Caminhos para persistência do modelo treinado e do pipeline de features
+# Caminhos para serialização do modelo e do pipeline de transformação.
 MODEL_PATH = MODELS_DIR / "mlp_model.joblib"
 PIPELINE_PATH = MODELS_DIR / "pipeline_features.joblib"
 
-# --- Configurações de Rastreamento (MLflow) ---
+# ==============================================================================
+# EXPERIMENTAÇÃO (MLFLOW)
+# ==============================================================================
+
 MLFLOW_EXPERIMENT_NAME = "Passos_Magicos_Classification"
 
-# --- Hiperparâmetros do Modelo e Treinamento ---
+# ==============================================================================
+# PARÂMETROS DE MACHINE LEARNING
+# ==============================================================================
 
-# Dicionário de configuração para o MLPClassifier (Scikit-Learn)
+# Configuração técnica do estimador MLPClassifier (Rede Neural).
 MODEL_PARAMS = {
-    'hidden_layer_sizes': (50,),
+'hidden_layer_sizes': (100,),
     'activation': 'relu',
     'alpha': 0.01,
     'learning_rate_init': 0.001,
-    'max_iter': 3000,
-    'solver': 'adam',
+    'max_iter': 2000,
     'random_state': 42
 }
 
-# Parâmetros para a estratégia de validação
+# Parâmetros para divisão de dados e validação cruzada.
 SPLIT_PARAMS = {
     'test_size': 0.2,
     'random_state': 42,
     'n_splits_cv': 5
 }
 
-# Mapeamento ordinal da variável alvo 'PEDRA'
+# Mapeamento ordinal das classes da variável alvo.
 MAPA_PEDRA = {'Quartzo': 0, 'Ágata': 1, 'Ametista': 2, 'Topázio': 3}

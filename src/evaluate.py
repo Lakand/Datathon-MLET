@@ -1,9 +1,9 @@
 # src/evaluate.py
-"""Módulo de Avaliação do Modelo.
+"""Módulo de Avaliação de Desempenho.
 
-Este script carrega o modelo treinado e o pipeline de features persistidos,
-aplica-os ao conjunto de dados de teste (holdout) e calcula métricas de
-desempenho como Relatório de Classificação e Matriz de Confusão.
+Este script automatiza o carregamento de modelos MLP e pipelines de features
+para validação contra o dataset de holdout, gerando métricas de classificação
+necessárias para a auditoria do modelo.
 """
 
 import json
@@ -13,19 +13,18 @@ from sklearn.metrics import classification_report, confusion_matrix
 from src.utils import load_artifact
 from src import config 
 
-def evaluate_model() -> dict:
-    """Avalia o modelo atual contra o dataset de teste.
 
-    Realiza as seguintes etapas:
-    1. Carrega o modelo (MLPClassifier) e o FeatureEngineer salvos.
-    2. Carrega e transforma os dados de teste (test.csv).
-    3. Gera predições e compara com os valores reais.
-    4. Compila métricas de performance.
+def evaluate_model() -> dict:
+    """Realiza a avaliação completa do modelo contra o conjunto de teste.
+
+    A função orquestra o carregamento de artefatos serializados, a aplicação
+    da engenharia de features nos dados de teste e a extração de métricas
+    estatísticas (Classification Report e Matriz de Confusão).
 
     Returns:
-        dict: Um dicionário contendo o status da operação e, em caso de sucesso,
-        as métricas 'classification_report' e 'confusion_matrix'. Em caso de
-        falha, retorna uma chave 'error' com a descrição do problema.
+        dict: Resultado da avaliação. Em caso de sucesso, retorna o status e 
+            as métricas. Em caso de falha (IO ou Transformação), retorna o 
+            erro encontrado.
     """
     print("1. Carregando artefatos e dados de teste...")
     try:
@@ -33,7 +32,9 @@ def evaluate_model() -> dict:
         fe = load_artifact(config.PIPELINE_PATH)
         df_test = pd.read_csv(config.TEST_DATA_PATH)
     except FileNotFoundError as e:
-        return {"error": f"Arquivos não encontrados. Treine o modelo primeiro. Detalhe: {str(e)}"}
+        return {
+            "error": f"Arquivos não encontrados. Treine o modelo primeiro. Detalhe: {str(e)}"
+        }
     except Exception as e:
         return {"error": f"Erro inesperado ao carregar modelo: {str(e)}"}
 
@@ -46,10 +47,13 @@ def evaluate_model() -> dict:
     print("3. Realizando previsões...")
     y_pred = mlp.predict(X_test)
     
+    # Mapeamento qualitativo das classes para o relatório final
     target_names = ['Quartzo', 'Ágata', 'Ametista', 'Topázio']
     
-    report_dict = classification_report(y_test, y_pred, target_names=target_names, output_dict=True)
-    
+    # Compilação das métricas de performance
+    report_dict = classification_report(
+        y_test, y_pred, target_names=target_names, output_dict=True
+    )
     cm = confusion_matrix(y_test, y_pred)
     
     return {
@@ -60,6 +64,8 @@ def evaluate_model() -> dict:
         }
     }
 
+
 if __name__ == "__main__":
+    # Ponto de entrada para execução manual e debug via CLI
     resultado = evaluate_model()
     print(json.dumps(resultado, indent=4))

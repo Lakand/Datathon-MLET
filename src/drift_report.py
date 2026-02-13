@@ -1,5 +1,9 @@
 # src/drift_report.py
-"""Módulo de Drift Report - VERSÃO VALIDAÇÃO (Train vs Test)."""
+"""Módulo de Drift Report - VERSÃO VALIDAÇÃO (Train vs Test).
+
+Este módulo automatiza a detecção de desvios estatísticos (drift) entre os dados
+usados no treinamento e os dados que o modelo está recebendo em produção ou teste.
+"""
 
 import os
 import logging
@@ -16,13 +20,22 @@ from src.utils import load_data, load_artifact
 from src.preprocessing import DataPreprocessor
 from src.feature_engineering import FeatureEngineer
 
+# Inicialização do Logger para monitoramento de execução
 logger = logging.getLogger(__name__)
 
+# Configurações de banco de dados e saída de relatórios
 DB_PATH = "monitoring.db"
 REPORT_PATH = os.path.join(config.BASE_DIR, "docs", "drift_report.html")
 
 def load_production_data() -> pd.DataFrame:
-    """Carrega dados de produção do banco."""
+    """Carrega dados de produção do banco.
+
+    Recupera os logs de inferência armazenados no SQLite e reconstrói o 
+    DataFrame a partir das strings JSON enviadas para a API.
+
+    Returns:
+        pd.DataFrame: Dados brutos coletados em produção.
+    """
     if not os.path.exists(DB_PATH):
         logger.warning("Banco de dados não encontrado.")
         return pd.DataFrame()
@@ -50,7 +63,15 @@ def load_production_data() -> pd.DataFrame:
     return pd.DataFrame(dados_expandidos)
 
 def apply_feature_engineering_transform(df: pd.DataFrame, fe: FeatureEngineer) -> pd.DataFrame:
-    """Aplica o FeatureEngineer e retorna DataFrame transformado."""
+    """Aplica o FeatureEngineer e retorna DataFrame transformado.
+
+    Args:
+        df: DataFrame original a ser transformado.
+        fe: Instância do FeatureEngineer carregada via artefato.
+
+    Returns:
+        pd.DataFrame: Dados processados com os nomes das colunas de treino.
+    """
     try:
         X_scaled, _ = fe.transform(df)
         df_transformed = pd.DataFrame(X_scaled, columns=fe.cols_treino)
@@ -65,15 +86,16 @@ def generate_report() -> str | None:
     ESTRATÉGIA:
     1. Se houver >= 100 registros de produção → Compara Train vs Produção
     2. Se houver < 100 registros → Compara Train vs Test (validação)
+
+    Returns:
+        str | None: Caminho do relatório gerado ou None em caso de falha.
     """
     
     logger.info("=" * 80)
     logger.info("DRIFT REPORT - VERSÃO INTELIGENTE")
     logger.info("=" * 80)
     
-    # ========================================================================
     # 1. CARREGAR DADOS DE REFERÊNCIA (TREINO)
-    # ========================================================================
     logger.info("1. Carregando dados de TREINO...")
     try:
         dict_abas = load_data(str(config.RAW_DATA_PATH))
@@ -88,9 +110,7 @@ def generate_report() -> str | None:
         logger.error(f"Erro ao carregar treino: {e}")
         return None
 
-    # ========================================================================
     # 2. CARREGAR FEATURE ENGINEER
-    # ========================================================================
     logger.info("2. Carregando FeatureEngineer...")
     try:
         fe = load_artifact(config.PIPELINE_PATH)
@@ -99,9 +119,7 @@ def generate_report() -> str | None:
         logger.error("   Pipeline não encontrado! Execute /train primeiro.")
         return None
 
-    # ========================================================================
     # 3. TRANSFORMAR DADOS DE TREINO
-    # ========================================================================
     logger.info("3. Transformando dados de TREINO...")
     try:
         df_ref_transformed = apply_feature_engineering_transform(df_ref_raw, fe)
@@ -110,19 +128,14 @@ def generate_report() -> str | None:
         logger.error(f"Erro ao transformar treino: {e}")
         return None
 
-    # ========================================================================
     # 4. DECIDIR ESTRATÉGIA: PRODUÇÃO OU TESTE?
-    # ========================================================================
     df_prod_raw = load_production_data()
     
     if len(df_prod_raw) >= 100:
-        # Temos dados suficientes de produção
         mode = "PRODUCTION"
         logger.info(f"4. Modo: PRODUÇÃO ({len(df_prod_raw)} registros)")
         df_current_raw = df_prod_raw
-        
     else:
-        # Poucos dados de produção, usar dataset de teste
         mode = "VALIDATION"
         logger.info(f"4. Modo: VALIDAÇÃO (usando dataset de teste)")
         logger.info(f"   Produção tem apenas {len(df_prod_raw)} registros (< 100)")
@@ -135,23 +148,18 @@ def generate_report() -> str | None:
             logger.error("   Dataset de teste não encontrado! Execute /train primeiro.")
             return None
 
-    # ========================================================================
     # 5. LIMPAR E TRANSFORMAR DADOS ATUAIS
-    # ========================================================================
     logger.info(f"5. Processando dados {'de PRODUÇÃO' if mode == 'PRODUCTION' else 'de TESTE'}...")
     
     try:
-        # Limpar
         if mode == "PRODUCTION":
             df_current_clean = preprocessor.clean_dataframe(df_current_raw)
         else:
             df_current_clean = df_current_raw  # Teste já está limpo
         
-        # Transformar
         df_current_transformed = apply_feature_engineering_transform(df_current_clean, fe)
         logger.info(f"   Shape: {df_current_transformed.shape}")
         
-        # Estatísticas comparativas
         logger.info("   Comparação de médias:")
         for col in df_ref_transformed.columns[:5]:
             ref_mean = df_ref_transformed[col].mean()
@@ -166,9 +174,7 @@ def generate_report() -> str | None:
         logger.error(traceback.format_exc())
         return None
 
-    # ========================================================================
     # 6. GERAR RELATÓRIO
-    # ========================================================================
     logger.info("6. Gerando relatório Evidently...")
     
     col_mapping = ColumnMapping()

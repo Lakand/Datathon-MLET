@@ -13,10 +13,9 @@ import os
 import tempfile
 import warnings
 import matplotlib
-matplotlib.use('Agg') 
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
-import pandas as pd
 import numpy as np
 import mlflow
 import mlflow.sklearn
@@ -31,11 +30,11 @@ from src.preprocessing import DataPreprocessor
 from src.feature_engineering import FeatureEngineer
 from src import config
 
-# Configuração de filtros de aviso
+# Configuração de filtros de aviso para manter a saída do console limpa
 warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# Configuração de logging temporário
+# Configuração de persistência de logs em arquivo temporário
 temp_log_file = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
 temp_log_path = temp_log_file.name
 temp_log_file.close()
@@ -53,7 +52,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 def plot_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, title: str = "Confusion Matrix") -> str:
+    """Gera e salva a matriz de confusão como um artefato visual.
+
+    Args:
+        y_true: Valores reais do target.
+        y_pred: Valores preditos pelo modelo.
+        title: Título do gráfico.
+
+    Returns:
+        str: Caminho do arquivo de imagem temporário.
+    """
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
@@ -70,7 +80,16 @@ def plot_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, title: str = "
     
     return temp_img.name
 
+
 def train_pipeline() -> dict:
+    """Executa o pipeline completo de treinamento e registro de experimentos.
+
+    Realiza o processamento de dados, validação cruzada por grupos (RA),
+    treinamento do modelo MLP e log de métricas e artefatos no MLflow.
+
+    Returns:
+        dict: Resumo das métricas calculadas durante o treinamento.
+    """
     mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
     
     temp_img_path = None
@@ -84,33 +103,25 @@ def train_pipeline() -> dict:
         mlflow.log_param("strategy", "Meio Termo (No Leakage)")
 
         try:
-            # Carregamento e Limpeza Inicial
             logger.info(f"Carregando dados...")
             dict_abas = load_data(str(config.RAW_DATA_PATH))
             preprocessor = DataPreprocessor()
             df_clean = preprocessor.run(dict_abas)
 
-            # === FIX CRÍTICO: Limpeza de Targets para o Treino ===
-            # Como o Preprocessor agora é permissivo (para o Drift Report),
-            # precisamos garantir aqui que o treino só use linhas com TARGET (PEDRA) válido.
-            # Remove linhas onde RA ou PEDRA são nulos
+            # Limpeza de alvos para garantir qualidade no conjunto de treinamento
             logger.info(f"Shape antes da limpeza de targets: {df_clean.shape}")
             df_clean = df_clean.dropna(subset=['RA', 'PEDRA'])
-            
-            # Filtra apenas as pedras que estão mapeadas no config (remove erros de digitação/pedras fora do escopo)
             df_clean = df_clean[df_clean['PEDRA'].isin(config.MAPA_PEDRA.keys())]
             df_clean = df_clean.reset_index(drop=True)
             logger.info(f"Shape pós limpeza de targets: {df_clean.shape}")
-            # ======================================================
             
-            # Divisão Treino/Teste (GroupShuffleSplit para evitar data leakage por RA)
+            # Divisão dos conjuntos de dados mantendo integridade por Registro Acadêmico
             splitter = GroupShuffleSplit(
                 test_size=config.SPLIT_PARAMS['test_size'], 
                 n_splits=1, 
                 random_state=config.SPLIT_PARAMS['random_state']
             )
             
-            # O split precisa que 'RA' esteja limpo (já garantido pelo dropna acima)
             train_idx, test_idx = next(splitter.split(df_clean, groups=df_clean['RA']))
             df_train = df_clean.iloc[train_idx].copy().reset_index(drop=True)
             df_test = df_clean.iloc[test_idx].copy().reset_index(drop=True)
@@ -118,7 +129,7 @@ def train_pipeline() -> dict:
             logger.info(f"Salvando dataset de teste em: {config.TEST_DATA_PATH}")
             df_test.to_csv(config.TEST_DATA_PATH, index=False)
 
-            # Validação Cruzada
+            # Validação Cruzada Estratificada por Grupo
             logger.info("Iniciando Cross-Validation...")
             sgkf = StratifiedGroupKFold(n_splits=config.SPLIT_PARAMS['n_splits_cv'])
             f1_scores = []
@@ -129,6 +140,7 @@ def train_pipeline() -> dict:
                 X_t, y_t = fe_cv.transform(df_train.iloc[t_idx])
                 X_v, y_v = fe_cv.transform(df_train.iloc[v_idx])
                 
+                # Balanceamento de classes para treinamento da rede neural
                 smote = SMOTE(random_state=config.MODEL_PARAMS['random_state'])
                 X_t_res, y_t_res = smote.fit_resample(X_t, y_t)
                 
@@ -145,7 +157,7 @@ def train_pipeline() -> dict:
             mlflow.log_metric("cv_mean_f1", mean_cv_f1)
             logger.info(f"CV F1-Macro: {mean_cv_f1:.4f}")
 
-            # Treinamento Final
+            # Ajuste do modelo final
             logger.info("Treinando modelo final...")
             fe_final = FeatureEngineer()
             fe_final.fit(df_train)
@@ -157,7 +169,7 @@ def train_pipeline() -> dict:
             model_final = MLPClassifier(**config.MODEL_PARAMS)
             model_final.fit(X_res, y_res)
             
-            # Avaliação no conjunto de Teste
+            # Validação no conjunto de holdout (Teste)
             X_test_scaled, y_test_real = fe_final.transform(df_test)
             y_pred_test = model_final.predict(X_test_scaled)
             
@@ -168,17 +180,15 @@ def train_pipeline() -> dict:
             mlflow.log_metric("test_accuracy", test_acc)
             logger.info(f"Test F1: {test_f1:.4f} | Acc: {test_acc:.4f}")
 
-            # Persistência dos Artefatos
+            # Salvamento de artefatos e registro no MLflow
             save_artifact(model_final, config.MODEL_PATH)
             save_artifact(fe_final, config.PIPELINE_PATH)
             
-            # Registro de Gráficos e Logs
             temp_img_path = plot_confusion_matrix(y_test_real, y_pred_test)
             mlflow.log_artifact(temp_img_path)
-            
             mlflow.sklearn.log_model(model_final, "mlp_model")
-            
             mlflow.log_artifact(temp_log_path, artifact_path="logs")
+            
             logger.info("Pipeline concluído e registrado no MLflow!")
             
             metrics_summary = {
@@ -193,6 +203,7 @@ def train_pipeline() -> dict:
             logger.critical(f"Erro no pipeline: {e}")
             raise e
         finally:
+            # Limpeza de recursos e fechamento de handlers
             try:
                 for handler in logging.root.handlers:
                     handler.close()
@@ -208,6 +219,7 @@ def train_pipeline() -> dict:
                 pass
                 
     return metrics_summary
+
 
 if __name__ == "__main__":
     train_pipeline()
