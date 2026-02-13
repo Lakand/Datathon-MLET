@@ -1,31 +1,37 @@
 # tests/test_feature_engineering.py
 """Testes Unitários de Engenharia de Features e Utilitários.
 
-Este módulo valida a lógica de transformação de dados da classe FeatureEngineer,
-garantindo que o pré-processamento para o modelo (tratamento de nulos,
-scaling e encoding de variáveis) ocorra sem erros.
+Este módulo valida a lógica de transformação de dados da classe FeatureEngineer
+e a integridade das funções de persistência de artefatos. Garante que o pipeline
+de Machine Learning receba dados normalizados e que o armazenamento em disco
+seja resiliente.
 """
 
+import os
 import pandas as pd
 import numpy as np
-import os
 from src.feature_engineering import FeatureEngineer
 from src.utils import save_artifact, load_artifact
 
-def test_feature_engineering_full():
-    """Valida o ciclo completo de engenharia de features (Fit e Transform).
 
-    Simula um DataFrame de entrada que JÁ PASSOU pelo DataPreprocessor, ou seja:
-    - Gênero já é numérico (0 ou 1).
-    - Variáveis numéricas podem ter valores ausentes (NaN).
+def test_feature_engineering_full():
+    """Valida o ciclo completo de fit e transform do FeatureEngineer.
+
+    Simula a entrada de dados após o processamento bruto, garantindo que:
+    1. Variáveis categóricas (Gênero) já estejam em formato binário.
+    2. Valores numéricos ausentes sejam imputados corretamente.
+    3. O mapeamento do target (Pedra) seja convertido para inteiros.
+
+    Returns:
+        None: O teste falha caso as asserções de integridade de shape, 
+            imputação de nulos ou tipagem do target não sejam atendidas.
     """
-    # 1. Dados simulados já pré-processados (IMPORTANTE: Gênero deve ser 0/1)
+    # Preparação de dataset simulado com GENERO numérico e nulos em NOTA_MAT
     df_input = pd.DataFrame({
         'RA': ['1', '2', '3'],
-        # CORREÇÃO AQUI: Em vez de 'Masculino'/'Feminino', usamos 0 e 1
         'GENERO': [0, 1, 0], 
         'PEDRA': ['Ametista', 'Topázio', 'Quartzo'],
-        'NOTA_MAT': [5.0, np.nan, 8.0], # Um nulo para testar inputação
+        'NOTA_MAT': [5.0, np.nan, 8.0],
         'NOTA_PORT': [6.0, 7.0, 8.0],
         'NOTA_ING': [6.0, 7.0, 8.0],
         'IPP': [5.0, 6.0, 7.0],
@@ -41,34 +47,32 @@ def test_feature_engineering_full():
         'DEFASAGEM': [0, 1, 0]
     })
 
-    # 2. Testar FIT e TRANSFORM
     engineer = FeatureEngineer()
-    
-    # Treina (fit) e transforma
     X_processed, y_processed = engineer.fit_transform(df_input)
     
-    # Validações
+    # Asserções de conformidade estrutural e de dados
     assert X_processed.shape[0] == 3
-    # Verifica se preencheu o Nulo de matemática
     assert not np.isnan(X_processed).any()
-    
-    # Verifica se a Pedra foi transformada em número (Target)
     assert y_processed is not None
     assert len(y_processed) == 3
-    
-    # Verifica se é um tipo inteiro
     assert pd.api.types.is_integer_dtype(y_processed)
 
+
 def test_utils_save_load(tmp_path):
-    """Testa as funções de persistência de artefatos (I/O)."""
-    # Testa as funções do utils.py usando uma pasta temporária
+    """Testa a persistência e integridade de artefatos via joblib.
+
+    Utiliza um diretório temporário para validar se dicionários e modelos
+    são gravados e lidos corretamente sem perda de informação.
+
+    Args:
+        tmp_path: Fixture do Pytest que fornece um diretório temporário isolado.
+    """
     arquivo = tmp_path / "teste.joblib"
     dados = {"chave": "valor"}
     
-    # Salva
+    # Validação do fluxo de I/O
     save_artifact(dados, str(arquivo))
     assert os.path.exists(arquivo)
     
-    # Carrega
     carregado = load_artifact(str(arquivo))
     assert carregado["chave"] == "valor"
