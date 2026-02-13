@@ -28,12 +28,15 @@ def init_db() -> None:
                 ra TEXT,
                 input_data TEXT,
                 predicted_pedra TEXT,
+                confidence_score REAL,
+                execution_time_ms REAL,
                 model_version TEXT
             )
         ''')
         conn.commit()
 
-def log_prediction(ra: str, input_data: dict, prediction: str, version: str = "v1") -> None:
+def log_prediction(ra: str, input_data: dict, prediction: str, 
+                   confidence: float, execution_time: float, version: str = "v1") -> None:
     """Registra uma predição no banco de dados.
 
     Salva os detalhes da inferência para permitir cálculos futuros de drift
@@ -51,9 +54,9 @@ def log_prediction(ra: str, input_data: dict, prediction: str, version: str = "v
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO predictions (ra, input_data, predicted_pedra, model_version)
-                VALUES (?, ?, ?, ?)
-            ''', (ra, json.dumps(input_data), prediction, version))
+                INSERT INTO predictions (ra, input_data, predicted_pedra, confidence_score, execution_time_ms, model_version)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (ra, json.dumps(input_data), prediction, confidence, execution_time, version))
             conn.commit()
             
     except Exception as e:

@@ -10,6 +10,7 @@ final e registro de experimentos no MLflow.
 import logging
 import sys
 import os
+import time
 import tempfile
 import warnings
 import matplotlib
@@ -22,7 +23,7 @@ import mlflow.sklearn
 
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
-from sklearn.metrics import f1_score, confusion_matrix, accuracy_score
+from sklearn.metrics import classification_report, f1_score, confusion_matrix, accuracy_score
 from imblearn.over_sampling import SMOTE
 
 from src.utils import load_data, save_artifact
@@ -167,7 +168,9 @@ def train_pipeline() -> dict:
             X_res, y_res = smote_final.fit_resample(X_final, y_final)
             
             model_final = MLPClassifier(**config.MODEL_PARAMS)
+            start_time = time.time()
             model_final.fit(X_res, y_res)
+            training_duration = time.time() - start_time
             
             # Validação no conjunto de holdout (Teste)
             X_test_scaled, y_test_real = fe_final.transform(df_test)
@@ -178,7 +181,23 @@ def train_pipeline() -> dict:
             
             mlflow.log_metric("test_f1_macro", test_f1)
             mlflow.log_metric("test_accuracy", test_acc)
-            logger.info(f"Test F1: {test_f1:.4f} | Acc: {test_acc:.4f}")
+            mlflow.log_metric("training_time_seconds", training_duration)
+
+            report = classification_report(
+                y_test_real, 
+                y_pred_test, 
+                target_names=list(config.MAPA_PEDRA.keys()), # Garante nomes legíveis
+                output_dict=True
+            )
+            
+            for pedra, metrics in report.items():
+                if isinstance(metrics, dict): # Ignora a chave 'accuracy' que é float
+                    # Ex: f1_Ametista, recall_Topazio, etc.
+                    mlflow.log_metric(f"precision_{pedra}", metrics['precision'])
+                    mlflow.log_metric(f"recall_{pedra}", metrics['recall'])
+                    mlflow.log_metric(f"f1_{pedra}", metrics['f1-score'])
+            
+            logger.info(f"Test F1: {test_f1:.4f} | Acc: {test_acc:.4f} | | Tempo: {training_duration:.2f}s")
 
             # Salvamento de artefatos e registro no MLflow
             save_artifact(model_final, config.MODEL_PATH)

@@ -14,8 +14,8 @@ from src.utils import calculate_risk_level
     ("Topázio", "Baixo"),
     ("Ágata", "Alto"),
     ("Quartzo", "Alto"),
-    ("ametista", "Baixo"), # Testando a robustez do .capitalize()
-    ("PEDRA DESCONHECIDA", "Alto") # Testando o caso default (else)
+    ("ametista", "Baixo"),
+    ("PEDRA DESCONHECIDA", "Alto")
 ])
 def test_regra_negocio_risco(pedra: str, risco_esperado: str):
     """Valida a regra de negócio de cálculo de risco (Pedra -> Risco).

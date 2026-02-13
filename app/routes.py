@@ -10,6 +10,8 @@ especializados.
 import os
 import joblib
 import pandas as pd
+import time
+import numpy as np
 from typing import List
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -25,7 +27,6 @@ from src.utils import calculate_risk_level
 
 router = APIRouter()
 
-# Cria o mapa reverso para traduzir números (0, 1...) em nomes (Quartzo, etc.)
 REVERSE_MAPA_PEDRA = {v: k for k, v in MAPA_PEDRA.items()}
 
 # --- ROTA 1: PREDIÇÃO (COM BACKGROUND TASKS) ---
@@ -52,50 +53,53 @@ def predict(request: Request, alunos: List[AlunoInput], background_tasks: Backgr
         HTTPException(503): Se o modelo ainda não tiver sido treinado/carregado.
         HTTPException(500): Erro interno durante o processamento.
     """
+    start_time = time.time()
     try:
-        # Recupera os modelos carregados na inicialização (main.py)
         model = request.app.state.model
         pipeline = request.app.state.pipeline
         
         if not model or not pipeline:
             raise HTTPException(status_code=503, detail="Modelo não carregado. Execute /train primeiro ou verifique os logs.")
 
-        # Converte a entrada (Pydantic) para DataFrame
         input_data = [aluno.dict() for aluno in alunos]
         df_input = pd.DataFrame(input_data)
 
-        # Aplica o pré-processamento (conversão de GÊNERO, limpeza de tipos, etc.)
         preprocessor = DataPreprocessor()
         df_input = preprocessor.clean_dataframe(df_input)
 
-        # Passa pelo Pipeline de Features (Scaler, Encoders, etc)
         X_scaled, _ = pipeline.transform(df_input)
         
-        # Realiza a predição
-        y_pred_idx = model.predict(X_scaled)
+        y_probs = model.predict_proba(X_scaled)
+        
+        y_pred_idx = np.argmax(y_probs, axis=1)
+        
+        end_time = time.time()
+        latency_ms = (end_time - start_time) * 1000
         
         results = []
         for i, pred_idx in enumerate(y_pred_idx):
             pedra_nome = REVERSE_MAPA_PEDRA.get(pred_idx, "Desconhecido")
             aluno_raw = input_data[i]
             
-            # Uso da função centralizada de Regra de Negócio
+            confidence = float(np.max(y_probs[i]))
+
             risco = calculate_risk_level(pedra_nome)
             
             result = {
                 "RA": aluno_raw.get("RA"),
                 "PEDRA_PREVISTA": pedra_nome,
-                "RISCO_DEFASAGEM": risco
+                "RISCO_DEFASAGEM": risco,
+                "CONFIANCA": confidence
             }
             results.append(result)
             
-            # Gravação de Log em Segundo Plano
-            # O usuário recebe a resposta imediatamente, e o servidor grava o log depois.
             background_tasks.add_task(
                 log_prediction,
                 ra=str(aluno_raw.get("RA")), 
                 input_data=aluno_raw, 
-                prediction=pedra_nome
+                prediction=pedra_nome,
+                confidence=confidence,
+                execution_time=latency_ms
             )
             
         return {"predictions": results}
@@ -126,7 +130,6 @@ def run_training(request: Request) -> dict:
         train_results = train_pipeline()
         
         print("Recarregando modelos em memória...")
-        # Atualiza o estado da aplicação com o novo modelo treinado
         request.app.state.model = joblib.load(MODEL_PATH)
         request.app.state.pipeline = joblib.load(PIPELINE_PATH)
         
@@ -184,7 +187,6 @@ def get_drift_report():
         if not report_path or not os.path.exists(report_path):
             raise HTTPException(status_code=500, detail="Falha interna ao gerar o arquivo de relatório.")
             
-        # Retorna o arquivo HTML diretamente
         return FileResponse(path=report_path, media_type='text/html', filename="drift_report.html")
         
     except HTTPException as he:
