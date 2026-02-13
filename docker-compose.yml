@@ -6,10 +6,9 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-      
       - ./docs:/app/docs
-      
       - ./models:/app/models
+      - ./mlruns:/app/mlruns
     environment:
       - PYTHONUNBUFFERED=1
       - DB_PATH=/app/data/monitoring.db 
